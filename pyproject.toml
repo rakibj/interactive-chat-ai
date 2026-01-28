@@ -1,0 +1,16 @@
+[project]
+name = "interactive-chat-ai"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "accelerate>=1.12.0",
+    "faster-whisper>=1.2.1",
+    "numpy>=2.4.1",
+    "sounddevice>=0.5.5",
+    "torch>=2.10.0",
+    "torchaudio>=2.10.0",
+    "transformers>=5.0.0",
+    "vosk>=0.3.45",
+]
