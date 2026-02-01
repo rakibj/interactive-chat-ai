@@ -10,3 +10,7 @@ wheels/
 .venv
 
 models/
+
+.env
+.env.local
+
