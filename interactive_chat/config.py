@@ -1,6 +1,8 @@
 """Centralized configuration for interactive chat system."""
 import os
 from pathlib import Path
+from typing import Optional, List
+from pydantic import BaseModel
 
 # Paths
 PROJECT_ROOT = Path(r"D:\Work\Projects\AI\interactive-chat-ai")
@@ -64,6 +66,26 @@ MIN_WORDS_FOR_INTERRUPT = 1
 # Conversation Memory
 MAX_MEMORY_TURNS = 24
 
+
+class InstructionProfile(BaseModel):
+    """Pydantic model for instruction profile configuration."""
+    name: str
+    start: str
+    voice: str
+    max_tokens: int
+    temperature: float
+    pause_ms: int
+    end_ms: int
+    safety_timeout_ms: int
+    interruption_sensitivity: float
+    human_speaking_limit_sec: Optional[int] = None
+    acknowledgments: List[str] = []
+    instructions: str
+
+    class Config:
+        frozen = True  # Make instances immutable
+
+
 # Conversation Configuration
 CONVERSATION_START = "human"  # Options: "human" or "ai" (can be overridden per profile)
 ACTIVE_PROFILE = "ielts_instructor"  # Select which profile to use
@@ -92,18 +114,22 @@ You are in a live spoken conversation.
 
 # Custom Instruction Profiles with per-profile settings
 INSTRUCTION_PROFILES = {
-    "negotiator": {
-        "name": "Negotiation (Buyer)",
-        "start": "human",
-        "voice": "alba",
-        "max_tokens": 80,
-        "temperature": 0.5,
-        "pause_ms": 600,
-        "end_ms": 1200,
-        "safety_timeout_ms": 2500,
-        "interruption_sensitivity": 0.0,
-        "instructions": """
-ROLE: You are the BUYER in a negotiation.
+    "negotiator": InstructionProfile(
+        name="Negotiation (Buyer)",
+        start="human",
+        voice="alba",
+        max_tokens=80,
+        temperature=0.5,
+        pause_ms=600,
+        end_ms=1200,
+        safety_timeout_ms=2500,
+        interruption_sensitivity=0.0,
+        human_speaking_limit_sec=45,
+        acknowledgments=[
+            "Okay.",
+            "Noted.",
+        ],
+        instructions="""ROLE: You are the BUYER in a negotiation.
 
 OBJECTIVE:
 - Pay as little as possible.
@@ -116,20 +142,28 @@ BEHAVIOR:
 - Stay in character.
 
 TONE: Confident, slightly skeptical.""",
-    },
+    ),
     
-    "ielts_instructor": {
-        "name": "IELTS Speaking Instructor (Part 1)",
-        "start": "ai",
-        "voice": "jean",
-        "max_tokens": 120,
-        "temperature": 0.6,
-        "pause_ms": 800,  # Longer pause for test taker responses
-        "end_ms": 1500,
-        "safety_timeout_ms": 3500,  # Longer safety timeout for longer responses
-        "interruption_sensitivity": 0.3,  # More responsive to interruptions
-        "instructions": """
-ROLE: You are an IELTS Speaking Instructor conducting Part 1 of the IELTS Speaking test.
+    "ielts_instructor": InstructionProfile(
+        name="IELTS Speaking Instructor (Part 1)",
+        start="ai",
+        voice="jean",
+        max_tokens=120,
+        temperature=0.6,
+        pause_ms=800,
+        end_ms=1500,
+        safety_timeout_ms=3500,
+        interruption_sensitivity=0.3,
+        human_speaking_limit_sec=5,
+        acknowledgments=[
+            "Thank you.",
+            "Good.",
+            "I see.",
+            "Excellent.",
+            "Right.",
+            "Got it.",
+        ],
+        instructions="""ROLE: You are an IELTS Speaking Instructor conducting Part 1 of the IELTS Speaking test.
 
 STRUCTURE - PART 1 ONLY:
 - Introduction: Greet the student and explain Part 1
@@ -145,7 +179,7 @@ SAMPLE QUESTIONS:
 - How do you spend your free time?
 
 BEHAVIOR:
-- Start with proper IELTS Part 1 introduction
+- Start with proper IELTS Part 1 introduction in 1 line
 - Ask one question at a time
 - Allow 30-40 seconds for each response
 - Ask follow-up questions to extend responses if needed (e.g., "Why?", "Tell me more about that")
@@ -154,20 +188,28 @@ BEHAVIOR:
 - Do NOT transition to Part 2 or Part 3
 
 TONE: Professional, encouraging, supportive.""",
-    },
+    ),
     
-    "confused_customer": {
-        "name": "Confused Customer",
-        "start": "ai",
-        "voice": "marius",
-        "max_tokens": 90,
-        "temperature": 0.7,
-        "pause_ms": 700,
-        "end_ms": 1400,
-        "safety_timeout_ms": 2800,
-        "interruption_sensitivity": 0.5,
-        "instructions": """
-ROLE: You are a confused customer trying to return an item or get support.
+    "confused_customer": InstructionProfile(
+        name="Confused Customer",
+        start="ai",
+        voice="marius",
+        max_tokens=90,
+        temperature=0.7,
+        pause_ms=700,
+        end_ms=1400,
+        safety_timeout_ms=2800,
+        interruption_sensitivity=0.5,
+        human_speaking_limit_sec=None,
+        acknowledgments=[
+            "I understand.",
+            "Okay, let me clarify.",
+            "Right, I get it.",
+            "So basically...",
+            "Got it.",
+            "Let me check that.",
+        ],
+        instructions="""ROLE: You are a confused customer trying to return an item or get support.
 
 CHARACTERISTICS:
 - You don't fully understand the return policy.
@@ -179,20 +221,28 @@ CHARACTERISTICS:
 OBJECTIVE: Get your issue resolved while expressing confusion and mild frustration.
 
 TONE: Confused, slightly frustrated, but trying to be reasonable.""",
-    },
+    ),
     
-    "technical_support": {
-        "name": "Technical Support Agent",
-        "start": "ai",
-        "voice": "cosette",
-        "max_tokens": 100,
-        "temperature": 0.4,
-        "pause_ms": 500,  # Quicker responses for tech support
-        "end_ms": 1000,
-        "safety_timeout_ms": 2200,
-        "interruption_sensitivity": 0.2,
-        "instructions": """
-ROLE: You are a technical support agent helping troubleshoot a problem.
+    "technical_support": InstructionProfile(
+        name="Technical Support Agent",
+        start="ai",
+        voice="cosette",
+        max_tokens=100,
+        temperature=0.4,
+        pause_ms=500,
+        end_ms=1000,
+        safety_timeout_ms=2200,
+        interruption_sensitivity=0.2,
+        human_speaking_limit_sec=30,
+        acknowledgments=[
+            "Got it.",
+            "Let me help with that.",
+            "Understood.",
+            "One moment.",
+            "I see the issue.",
+            "Okay, try that.",
+        ],
+        instructions="""ROLE: You are a technical support agent helping troubleshoot a problem.
 
 BEHAVIOR:
 - Ask diagnostic questions step by step.
@@ -203,20 +253,28 @@ BEHAVIOR:
 - Offer alternative solutions when possible.
 
 TONE: Patient, knowledgeable, professional.""",
-    },
+    ),
     
-    "language_tutor": {
-        "name": "English Language Tutor",
-        "start": "ai",
-        "voice": "fantine",
-        "max_tokens": 110,
-        "temperature": 0.6,
-        "pause_ms": 700,
-        "end_ms": 1400,
-        "safety_timeout_ms": 3000,
-        "interruption_sensitivity": 0.1,
-        "instructions": """
-ROLE: You are an English language tutor having a conversational lesson.
+    "language_tutor": InstructionProfile(
+        name="English Language Tutor",
+        start="ai",
+        voice="fantine",
+        max_tokens=110,
+        temperature=0.6,
+        pause_ms=700,
+        end_ms=1400,
+        safety_timeout_ms=3000,
+        interruption_sensitivity=0.1,
+        human_speaking_limit_sec=None,
+        acknowledgments=[
+            "Great!",
+            "Excellent point.",
+            "I see.",
+            "Well said.",
+            "Nice usage.",
+            "Perfect.",
+        ],
+        instructions="""ROLE: You are an English language tutor having a conversational lesson.
 
 OBJECTIVES:
 - Engage in natural conversation about interesting topics.
@@ -232,20 +290,28 @@ BEHAVIOR:
 - Be encouraging about mistakes (they're learning opportunities).
 
 TONE: Friendly, encouraging, educational.""",
-    },
+    ),
 
-    "curious_friend": {
-        "name": "Curious Friend",
-        "start": "ai",
-        "voice": "alba",
-        "max_tokens": 95,
-        "temperature": 0.75,  # Higher temp for more varied/natural responses
-        "pause_ms": 750,
-        "end_ms": 1300,
-        "safety_timeout_ms": 2800,
-        "interruption_sensitivity": 0.4,
-        "instructions": """
-ROLE: You are a curious friend having a casual conversation.
+    "curious_friend": InstructionProfile(
+        name="Curious Friend",
+        start="ai",
+        voice="alba",
+        max_tokens=95,
+        temperature=0.75,
+        pause_ms=750,
+        end_ms=1300,
+        safety_timeout_ms=2800,
+        interruption_sensitivity=0.4,
+        human_speaking_limit_sec=None,
+        acknowledgments=[
+            "That's cool!",
+            "Oh, interesting!",
+            "I see.",
+            "No way!",
+            "That makes sense.",
+            "Tell me more!",
+        ],
+        instructions="""ROLE: You are a curious friend having a casual conversation.
 
 BEHAVIOR:
 - Ask genuine questions about the person's life and interests.
@@ -256,7 +322,7 @@ BEHAVIOR:
 - Remember details they mention and reference them later.
 
 TONE: Warm, engaged, genuinely interested.""",
-    },
+    ),
 }
 
 
@@ -275,19 +341,21 @@ def get_profile_settings(profile_key: str = None) -> dict:
     if profile_key not in INSTRUCTION_PROFILES:
         raise ValueError(f"Unknown profile: {profile_key}. Available: {list(INSTRUCTION_PROFILES.keys())}")
     
-    profile = INSTRUCTION_PROFILES[profile_key]
+    profile: InstructionProfile = INSTRUCTION_PROFILES[profile_key]
     
     return {
-        "name": profile["name"],
-        "start": profile.get("start", CONVERSATION_START),
-        "voice": profile.get("voice", POCKET_VOICE),
-        "max_tokens": profile.get("max_tokens", LLM_MAX_TOKENS),
-        "temperature": profile.get("temperature", LLM_TEMPERATURE),
-        "pause_ms": profile.get("pause_ms", PAUSE_MS),
-        "end_ms": profile.get("end_ms", END_MS),
-        "safety_timeout_ms": profile.get("safety_timeout_ms", SAFETY_TIMEOUT_MS),
-        "interruption_sensitivity": profile.get("interruption_sensitivity", INTERRUPTION_SENSITIVITY),
-        "instructions": profile["instructions"],
+        "name": profile.name,
+        "start": profile.start,
+        "voice": profile.voice,
+        "max_tokens": profile.max_tokens,
+        "temperature": profile.temperature,
+        "pause_ms": profile.pause_ms,
+        "end_ms": profile.end_ms,
+        "safety_timeout_ms": profile.safety_timeout_ms,
+        "interruption_sensitivity": profile.interruption_sensitivity,
+        "human_speaking_limit_sec": profile.human_speaking_limit_sec,
+        "acknowledgments": profile.acknowledgments,
+        "instructions": profile.instructions,
     }
 
 
@@ -306,8 +374,8 @@ def get_system_prompt(profile_key: str = None) -> str:
     if profile_key not in INSTRUCTION_PROFILES:
         raise ValueError(f"Unknown profile: {profile_key}. Available: {list(INSTRUCTION_PROFILES.keys())}")
     
-    profile = INSTRUCTION_PROFILES[profile_key]
-    return SYSTEM_PROMPT_BASE + "\n\n" + profile["instructions"]
+    profile: InstructionProfile = INSTRUCTION_PROFILES[profile_key]
+    return SYSTEM_PROMPT_BASE + "\n\n" + profile.instructions
 
 
 # Backwards compatibility
