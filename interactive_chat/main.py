@@ -30,11 +30,10 @@ torch.set_grad_enabled(False)
 sys.path.insert(0, str(os.path.dirname(__file__)))
 
 from config import (
-    SAFETY_TIMEOUT_MS,
     CONFIDENCE_THRESHOLD,
-    LLM_MAX_TOKENS,
-    LLM_TEMPERATURE,
-    SYSTEM_PROMPT,
+    ACTIVE_PROFILE,
+    get_system_prompt,
+    get_profile_settings,
 )
 from core import AudioManager, TurnTaker, InterruptionManager, ConversationMemory
 from interfaces import get_asr, get_llm, get_tts
@@ -70,10 +69,22 @@ class ConversationEngine:
     """Main orchestration engine."""
     
     def __init__(self):
+        # Load profile settings
+        self.profile_settings = get_profile_settings(ACTIVE_PROFILE)
+        
         self.audio_manager = AudioManager()
         self.turn_taker = TurnTaker()
         self.interruption_manager = InterruptionManager()
         self.conversation_memory = ConversationMemory()
+        
+        # Update turn_taker with profile-specific settings
+        from config import PAUSE_MS, END_MS, SAFETY_TIMEOUT_MS
+        self.turn_taker.pause_ms = self.profile_settings["pause_ms"]
+        self.turn_taker.end_ms = self.profile_settings["end_ms"]
+        self.turn_taker.safety_timeout_ms = self.profile_settings["safety_timeout_ms"]
+        
+        # Update interruption manager with profile-specific settings
+        self.interruption_manager.sensitivity = self.profile_settings["interruption_sensitivity"]
         
         self.asr = get_asr()
         self.llm = get_llm()
@@ -131,6 +142,30 @@ class ConversationEngine:
             except queue.Empty:
                 pass
     
+    def _generate_ai_greeting(self, system_prompt: str) -> None:
+        """Generate initial AI greeting."""
+        print("🤖 AI is speaking first...\n")
+        
+        messages = [
+            {"role": "system", "content": system_prompt},
+        ]
+        
+        greeting = ""
+        for token in self.llm.stream_completion(
+            messages=messages,
+            max_tokens=self.profile_settings["max_tokens"],
+            temperature=self.profile_settings["temperature"],
+        ):
+            if token:
+                greeting += token
+                print(token, end="", flush=True)
+        
+        print("\n")
+        
+        if greeting.strip():
+            self.conversation_memory.add_message("assistant", greeting.strip())
+            self.response_queue.put(greeting.strip())
+    
     def _process_turn(self, turn_audio_frames: List) -> None:
         """Process a complete conversation turn."""
         if not turn_audio_frames:
@@ -172,8 +207,9 @@ class ConversationEngine:
             
             # Generate response
             t3 = time.perf_counter()
+            system_prompt = get_system_prompt(ACTIVE_PROFILE)
             messages = (
-                [{"role": "system", "content": SYSTEM_PROMPT}]
+                [{"role": "system", "content": system_prompt}]
                 + self.conversation_memory.get_messages()
             )
             
@@ -182,8 +218,8 @@ class ConversationEngine:
             
             for token in self.llm.stream_completion(
                 messages=messages,
-                max_tokens=LLM_MAX_TOKENS,
-                temperature=LLM_TEMPERATURE,
+                max_tokens=self.profile_settings["max_tokens"],
+                temperature=self.profile_settings["temperature"],
             ):
                 if self.human_interrupt_event.is_set():
                     print("🛑 LLM interrupted by human")
@@ -228,7 +264,17 @@ class ConversationEngine:
     
     def run(self) -> None:
         """Main conversation loop."""
-        print("🎙️ Real-time conversation started")
+        system_prompt = get_system_prompt(ACTIVE_PROFILE)
+        print(f"🎙️ Real-time conversation started")
+        print(f"📋 Profile: {self.profile_settings['name']}")
+        print(f"👥 Start with: {self.profile_settings['start'].upper()}")
+        print(f"🎙️ Voice: {self.profile_settings['voice']}")
+        print(f"⏱️  Timeouts: pause={self.profile_settings['pause_ms']}ms, end={self.profile_settings['end_ms']}ms, safety={self.profile_settings['safety_timeout_ms']}ms")
+        print(f"{'='*60}\n")
+        
+        # If AI starts, generate opening greeting
+        if self.profile_settings["start"] == "ai":
+            self._generate_ai_greeting(system_prompt)
         
         vad_buffer = np.zeros(0, dtype=np.float32)
         energy_history = deque(maxlen=15)

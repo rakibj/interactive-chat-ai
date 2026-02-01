@@ -21,6 +21,11 @@ class TurnTaker:
         self.energy_history = deque(maxlen=15)
         self.micro_spike_times = deque(maxlen=5)
         self.last_ai_interrupted = False
+        
+        # Profile-specific settings (can be overridden after init)
+        self.pause_ms = PAUSE_MS
+        self.end_ms = END_MS
+        self.safety_timeout_ms = SAFETY_TIMEOUT_MS
     
     def update_energy(self, rms: float) -> None:
         """Update energy history."""
@@ -50,7 +55,7 @@ class TurnTaker:
                 self.last_voice_time = current_time
             else:
                 elapsed_ms = (current_time - self.last_voice_time) * 1000
-                if elapsed_ms >= PAUSE_MS:
+                if elapsed_ms >= self.pause_ms:
                     self.state = "PAUSING"
                     print(f"🟡 Pause {int(elapsed_ms)} ms")
         
@@ -58,7 +63,7 @@ class TurnTaker:
             elapsed_ms = (current_time - self.last_voice_time) * 1000
             
             # SAFETY TIMEOUT: Force end if taking too long
-            if elapsed_ms > SAFETY_TIMEOUT_MS:
+            if elapsed_ms > self.safety_timeout_ms:
                 print(f"🔴 SAFETY TIMEOUT: Forced turn end after {elapsed_ms:.0f}ms")
                 should_end_turn = True
                 self.reset()
@@ -88,10 +93,10 @@ class TurnTaker:
         confidence = 0.0
         
         # Primary: Silence duration
-        if elapsed_ms > END_MS:
+        if elapsed_ms > self.end_ms:
             confidence += 1.0
-        elif elapsed_ms > 900:
-            confidence += 0.6  # Interim confidence at 900ms
+        elif elapsed_ms > (self.end_ms * 0.75):
+            confidence += 0.6  # Interim confidence at 75% of end_ms
         
         # Secondary: Energy floor check
         if len(self.energy_history) >= 8:
