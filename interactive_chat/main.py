@@ -189,6 +189,7 @@ class ConversationEngine:
         authority = self.profile_settings.get("authority", "human")
         if authority == "ai" and self.ai_speaking:
             print(f"🛑 SAFEGUARD: Rejecting turn - AI is currently speaking (mic should be closed)")
+            self.human_interrupt_event.clear()
             return
         
         if not turn_audio_frames:
@@ -208,6 +209,7 @@ class ConversationEngine:
             
             if full_audio.size == 0:
                 print("⚠️ Empty audio buffer — skipping response")
+                self.human_interrupt_event.clear()
                 return
             
             user_text = self.asr.transcribe(full_audio)
@@ -216,12 +218,14 @@ class ConversationEngine:
             # SAFEGUARD: Double-check after transcription
             if authority == "ai" and self.ai_speaking:
                 print(f"🛑 SAFEGUARD POST-TRANSCRIPTION: Discarding '{user_text}' - AI is currently speaking")
+                self.human_interrupt_event.clear()
                 return
             
             # **FIX: Stricter filter - only count alphabetic words**
             word_count = len([w for w in user_text.split() if w and any(c.isalpha() for c in w)])
             if word_count == 0:
                 print(f"⚠️  No valid words (got '{user_text}') — skipping response")
+                self.human_interrupt_event.clear()
                 return
             
             # Prepend acknowledgment if human speaking limit was exceeded
@@ -231,6 +235,7 @@ class ConversationEngine:
             
             if self.human_interrupt_event.is_set():
                 print("🧠 Interrupted during transcription")
+                self.human_interrupt_event.clear()
                 return
             
             timing.whisper_transcribe_ms = (time.perf_counter() - t1) * 1000
@@ -239,6 +244,7 @@ class ConversationEngine:
             
             if not user_text:
                 print("⚠️ Empty transcription — skipping response")
+                self.human_interrupt_event.clear()
                 return
             
             # Add to memory
@@ -263,6 +269,7 @@ class ConversationEngine:
             ):
                 if self.human_interrupt_event.is_set():
                     print("🛑 LLM interrupted by human")
+                    self.human_interrupt_event.clear()
                     return
                 
                 if not token:
@@ -372,15 +379,25 @@ class ConversationEngine:
                 if speech_started or sustained:
                     self.human_speaking_now.set()
                     
-                    # **CRITICAL: Only track start time if AI is NOT currently speaking**
-                    # In "ai" authority mode, this provides absolute protection
-                    if self.human_speech_start_time is None and not self.ai_speaking:
-                        self.human_speech_start_time = now
-                        self.human_speaking_limit_ack_sent = False
-                        human_limit_exceeded_ack = None
-                        self._last_debug_duration = -1
-                        limit_sec = self.profile_settings.get("human_speaking_limit_sec")
-                        print(f"\n💬 [SPEECH START] limit_sec={limit_sec}, flag={self.human_speaking_limit_ack_sent}")
+                    # In "human" authority mode, detect interruption (human speaking while AI speaks)
+                    # ONLY set on first detection, not repeatedly
+                    if authority == "human" and self.ai_speaking and not self.human_interrupt_event.is_set():
+                        print(f"⚡ INTERRUPT: Human speech detected while AI speaking")
+                        self.human_interrupt_event.set()
+                    
+                    # **CRITICAL: Only track start time if AI is NOT currently speaking (in "ai" authority mode)**
+                    # In "human" authority mode, always allow speech tracking (allow interrupts)
+                    if self.human_speech_start_time is None:
+                        # Only block if in "ai" authority AND AI is speaking
+                        if authority == "ai" and self.ai_speaking:
+                            pass  # Don't track speech during AI speaking in ai mode
+                        else:
+                            self.human_speech_start_time = now
+                            self.human_speaking_limit_ack_sent = False
+                            human_limit_exceeded_ack = None
+                            self._last_debug_duration = -1
+                            limit_sec = self.profile_settings.get("human_speaking_limit_sec")
+                            print(f"\n💬 [SPEECH START] limit_sec={limit_sec}, flag={self.human_speaking_limit_ack_sent}")
                     
                     # Only check limit if speech timer is actually running
                     if self.human_speech_start_time is not None:
@@ -465,6 +482,7 @@ class ConversationEngine:
                         prev_start_time = self.human_speech_start_time
                         self.human_speech_start_time = None
                         self.human_speaking_limit_ack_sent = False
+                        self.human_interrupt_event.clear()  # Clear interrupt flag for next turn
                         self._last_debug_duration = -1
                         if prev_start_time is not None:
                             tracked_duration = (now - prev_start_time)
