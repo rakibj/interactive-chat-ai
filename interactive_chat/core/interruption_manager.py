@@ -6,7 +6,6 @@ from config import (
     INTERRUPT_DEBOUNCE_MS,
     INTERRUPTION_SENSITIVITY,
     MIN_WORDS_FOR_INTERRUPT,
-    TRANSCRIPTION_MODE,
 )
 
 
@@ -16,7 +15,6 @@ class InterruptionManager:
     def __init__(self):
         self.last_interrupt_time = 0
         self.sensitivity = INTERRUPTION_SENSITIVITY
-        self.transcription_mode = TRANSCRIPTION_MODE
     
     def should_interrupt(
         self,

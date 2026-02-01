@@ -2,12 +2,13 @@
 
 Split into two stages:
 1. RealtimeASR: Streaming partial transcriptions (uses Vosk)
-2. TurnEndASR: Final transcription at turn end (uses Whisper)
+2. TurnEndASR: Final transcription at turn end (uses WhisperLocalASR or WhisperCloudASR)
 
 Main.py uses both via HybridASR which combines them.
 """
 from abc import ABC, abstractmethod
 import json
+import io
 import numpy as np
 from collections import deque
 from faster_whisper import WhisperModel
@@ -16,6 +17,9 @@ from config import (
     VOSK_MODEL_PATH,
     SAMPLE_RATE,
     VOSK_MIN_SAMPLES,
+    OPENAI_API_KEY,
+    TURN_END_ASR_MODE,
+    WHISPER_CLOUD_MODEL,
 )
 from utils.audio import float32_to_int16
 
@@ -91,7 +95,7 @@ class WhisperLocalASR(TurnEndASR):
     """
     
     def __init__(self):
-        print("Loading Whisper (for final transcription)...")
+        print("Loading Whisper (local model for final transcription)...")
         self.model = WhisperModel(
             WHISPER_MODEL_PATH,
             device="cpu",
@@ -110,6 +114,81 @@ class WhisperLocalASR(TurnEndASR):
             condition_on_previous_text=False,
         )
         return " ".join(seg.text for seg in segments).strip()
+
+
+class WhisperCloudASR(TurnEndASR):
+    """OpenAI Whisper Cloud API for high-accuracy final transcription.
+    
+    Called at turn end for accurate, complete transcription.
+    Uses OpenAI's cloud API (gpt-4o-transcribe or gpt-4o-mini-transcribe).
+    Requires OPENAI_API_KEY environment variable.
+    
+    Advantages over local Whisper:
+    - Higher accuracy
+    - Faster transcription
+    - Automatic audio format handling
+    - Support for multiple languages
+    
+    Note: Requires API calls and will incur costs.
+    """
+    
+    def __init__(self):
+        from openai import OpenAI
+        
+        if not OPENAI_API_KEY:
+            raise ValueError(
+                "WhisperCloudASR requires OPENAI_API_KEY environment variable. "
+                "Set it or use WhisperLocalASR instead."
+            )
+        
+        print(f"Using OpenAI Whisper Cloud ({WHISPER_CLOUD_MODEL}) for final transcription...")
+        self.client = OpenAI(api_key=OPENAI_API_KEY)
+        self.model = WHISPER_CLOUD_MODEL
+    
+    def transcribe(self, audio: np.ndarray) -> str:
+        """Transcribe audio buffer using OpenAI Whisper API.
+        
+        Converts numpy audio to WAV format and sends to OpenAI API.
+        """
+        try:
+            # Convert numpy float32 to WAV bytes
+            wav_bytes = self._numpy_to_wav(audio)
+            
+            # Send to OpenAI API
+            transcript = self.client.audio.transcriptions.create(
+                model=self.model,
+                file=("audio.wav", wav_bytes, "audio/wav"),
+                response_format="text",
+                language="en",
+            )
+            
+            return transcript.strip()
+        except Exception as e:
+            print(f"Error transcribing with cloud API: {e}")
+            return ""
+    
+    @staticmethod
+    def _numpy_to_wav(audio: np.ndarray) -> bytes:
+        """Convert numpy float32 audio to WAV bytes."""
+        import wave
+        
+        # Ensure float32
+        if audio.dtype != np.float32:
+            audio = audio.astype(np.float32)
+        
+        # Convert to 16-bit PCM
+        audio_int16 = float32_to_int16(audio)
+        
+        # Write to WAV bytes
+        wav_buffer = io.BytesIO()
+        with wave.open(wav_buffer, 'wb') as wav_file:
+            wav_file.setnchannels(1)  # mono
+            wav_file.setsampwidth(2)  # 16-bit
+            wav_file.setframerate(SAMPLE_RATE)
+            wav_file.writeframes(audio_int16.tobytes())
+        
+        wav_buffer.seek(0)
+        return wav_buffer.read()
 
 
 class HybridASR:

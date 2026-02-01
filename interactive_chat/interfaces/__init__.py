@@ -7,6 +7,7 @@ from .asr import (
     TurnEndASR,
     VoskRealtime,
     WhisperLocalASR,
+    WhisperCloudASR,
     HybridASR,
 )
 from .llm import get_llm, LLMInterface, LocalLLM, CloudLLM
@@ -20,6 +21,7 @@ __all__ = [
     "TurnEndASR",
     "VoskRealtime",
     "WhisperLocalASR",
+    "WhisperCloudASR",
     "HybridASR",
     "get_llm",
     "get_tts",

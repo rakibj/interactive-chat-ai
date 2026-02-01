@@ -22,9 +22,15 @@ CONFIDENCE_THRESHOLD = 1.2
 INTERRUPT_DEBOUNCE_MS = 250
 
 # ASR Configuration
-TRANSCRIPTION_MODE = "vosk"  # Options: "vosk" (fast partials) or "whisper"
-WHISPER_MODEL_PATH = str(MODELS_ROOT / "whisper" / "distil-small.en")
+# Real-time ASR: Uses Vosk for low-latency streaming partials (closed-caption updates)
 VOSK_MODEL_PATH = str(MODELS_ROOT / "vosk-model-small-en-us-0.15")
+
+# Turn-end ASR: Options for final transcription
+# - "local": WhisperLocalASR (local Whisper model, slower but free)
+# - "cloud": WhisperCloudASR (OpenAI API, requires OPENAI_API_KEY, faster and more accurate)
+TURN_END_ASR_MODE = "cloud"  # Choose "local" or "cloud"
+WHISPER_MODEL_PATH = str(MODELS_ROOT / "whisper" / "distil-small.en")
+WHISPER_CLOUD_MODEL = "gpt-4o-mini-transcribe"  # For cloud: gpt-4o-mini-transcribe, gpt-4o-transcribe
 
 # LLM Configuration
 LLM_BACKEND = "groq"  # Options: "local", "groq", "deepseek", "openai"
