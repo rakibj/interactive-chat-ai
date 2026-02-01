@@ -78,6 +78,7 @@ class InstructionProfile(BaseModel):
     end_ms: int
     safety_timeout_ms: int
     interruption_sensitivity: float
+    authority: str  # "ai" (closed mic when AI speaking) or "human" (open mic always)
     human_speaking_limit_sec: Optional[int] = None
     acknowledgments: List[str] = []
     instructions: str
@@ -124,6 +125,7 @@ INSTRUCTION_PROFILES = {
         end_ms=1200,
         safety_timeout_ms=2500,
         interruption_sensitivity=0.0,
+        authority="human",
         human_speaking_limit_sec=45,
         acknowledgments=[
             "Okay.",
@@ -154,6 +156,7 @@ TONE: Confident, slightly skeptical.""",
         end_ms=1500,
         safety_timeout_ms=3500,
         interruption_sensitivity=0.3,
+        authority="ai",
         human_speaking_limit_sec=5,
         acknowledgments=[
             "Thank you.",
@@ -166,7 +169,7 @@ TONE: Confident, slightly skeptical.""",
         instructions="""ROLE: You are an IELTS Speaking Instructor conducting Part 1 of the IELTS Speaking test.
 
 STRUCTURE - PART 1 ONLY:
-- Introduction: Greet the student and explain Part 1
+- Introduction: Directly ask the question without extra preamble
 - Ask 4-5 personal questions on familiar topics
 - Each question should follow naturally from previous responses
 - Topics typically include: home, family, hobbies, work, studies, daily life, interests
@@ -179,7 +182,6 @@ SAMPLE QUESTIONS:
 - How do you spend your free time?
 
 BEHAVIOR:
-- Start with proper IELTS Part 1 introduction in 1 line
 - Ask one question at a time
 - Allow 30-40 seconds for each response
 - Ask follow-up questions to extend responses if needed (e.g., "Why?", "Tell me more about that")
@@ -200,6 +202,7 @@ TONE: Professional, encouraging, supportive.""",
         end_ms=1400,
         safety_timeout_ms=2800,
         interruption_sensitivity=0.5,
+        authority="human",
         human_speaking_limit_sec=None,
         acknowledgments=[
             "I understand.",
@@ -233,6 +236,7 @@ TONE: Confused, slightly frustrated, but trying to be reasonable.""",
         end_ms=1000,
         safety_timeout_ms=2200,
         interruption_sensitivity=0.2,
+        authority="ai",
         human_speaking_limit_sec=30,
         acknowledgments=[
             "Got it.",
@@ -265,6 +269,7 @@ TONE: Patient, knowledgeable, professional.""",
         end_ms=1400,
         safety_timeout_ms=3000,
         interruption_sensitivity=0.1,
+        authority="human",
         human_speaking_limit_sec=None,
         acknowledgments=[
             "Great!",
@@ -302,6 +307,7 @@ TONE: Friendly, encouraging, educational.""",
         end_ms=1300,
         safety_timeout_ms=2800,
         interruption_sensitivity=0.4,
+        authority="human",
         human_speaking_limit_sec=None,
         acknowledgments=[
             "That's cool!",
@@ -353,6 +359,7 @@ def get_profile_settings(profile_key: str = None) -> dict:
         "end_ms": profile.end_ms,
         "safety_timeout_ms": profile.safety_timeout_ms,
         "interruption_sensitivity": profile.interruption_sensitivity,
+        "authority": profile.authority,
         "human_speaking_limit_sec": profile.human_speaking_limit_sec,
         "acknowledgments": profile.acknowledgments,
         "instructions": profile.instructions,

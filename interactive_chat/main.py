@@ -95,6 +95,7 @@ class ConversationEngine:
         self.human_speech_start_time = None  # Track when human starts speaking
         self.human_speaking_limit_ack_sent = False  # Track if we've already sent acknowledgment
         self._last_debug_duration = -1  # Track for debug output
+        self.ai_speaking = False  # Track if AI is currently speaking
         self.response_queue = queue.Queue()
         self.human_interrupt_event = threading.Event()
         self.ai_speaking_event = threading.Event()
@@ -140,7 +141,14 @@ class ConversationEngine:
                         self.response_queue.queue.clear()
                     continue
                 
-                self.tts.speak(text)
+                self.ai_speaking = True
+                try:
+                    self.tts.speak(text)
+                finally:
+                    # Wait a brief moment to ensure TTS is completely done
+                    time.sleep(0.2)
+                    self.ai_speaking = False
+                    print(f"🤐 AI finished speaking, mic reopened")
             
             except queue.Empty:
                 pass
@@ -167,6 +175,7 @@ class ConversationEngine:
         
         if greeting.strip():
             self.conversation_memory.add_message("assistant", greeting.strip())
+            self.ai_speaking = True  # Set flag BEFORE queuing to avoid race condition
             self.response_queue.put(greeting.strip())
     
     def _process_turn(self, turn_audio_frames: List, human_limit_ack: str = None) -> None:
@@ -176,6 +185,12 @@ class ConversationEngine:
             turn_audio_frames: List of audio frames from this turn
             human_limit_ack: Optional acknowledgment to prepend if limit was exceeded
         """
+        # SAFEGUARD: Reject turns processed while AI was speaking in "ai" authority mode
+        authority = self.profile_settings.get("authority", "human")
+        if authority == "ai" and self.ai_speaking:
+            print(f"🛑 SAFEGUARD: Rejecting turn - AI is currently speaking (mic should be closed)")
+            return
+        
         if not turn_audio_frames:
             print("⚠️ No audio captured — skipping response")
             return
@@ -196,6 +211,18 @@ class ConversationEngine:
                 return
             
             user_text = self.asr.transcribe(full_audio)
+            user_text = user_text.strip()
+            
+            # SAFEGUARD: Double-check after transcription
+            if authority == "ai" and self.ai_speaking:
+                print(f"🛑 SAFEGUARD POST-TRANSCRIPTION: Discarding '{user_text}' - AI is currently speaking")
+                return
+            
+            # **FIX: Stricter filter - only count alphabetic words**
+            word_count = len([w for w in user_text.split() if w and any(c.isalpha() for c in w)])
+            if word_count == 0:
+                print(f"⚠️  No valid words (got '{user_text}') — skipping response")
+                return
             
             # Prepend acknowledgment if human speaking limit was exceeded
             if human_limit_ack:
@@ -248,11 +275,13 @@ class ConversationEngine:
                 if token in ".!?":
                     sentence = sentence_buffer.strip()
                     if sentence:
+                        self.ai_speaking = True  # Mark AI as about to speak
                         self.response_queue.put(sentence)
                     sentence_buffer = ""
             
             # Handle remaining text
             if sentence_buffer.strip():
+                self.ai_speaking = True  # Mark AI as about to speak
                 self.response_queue.put(sentence_buffer.strip())
             
             # Timing metrics
@@ -267,7 +296,7 @@ class ConversationEngine:
             timing.total_latency_ms = (time.perf_counter() - timing.speech_end_time) * 1000
             timing.print_report()
             self.timing_history.append(timing)
-            self.turn_counter += 1
+            # NOTE: turn_counter is incremented in run() loop, not here
             self.human_interrupt_event.clear()
         
         except Exception as e:
@@ -295,10 +324,26 @@ class ConversationEngine:
         
         vad_buffer = np.zeros(0, dtype=np.float32)
         energy_history = deque(maxlen=15)
-        human_limit_exceeded_ack = None  # Track acknowledgment to inject into turn
+        
+        # **Initialize all state variables**
+        self.human_speech_start_time = None
+        self.human_speaking_limit_ack_sent = False
+        self._last_debug_duration = -1
+        human_limit_exceeded_ack = None
         
         try:
             while True:
+                # Check authority mode FIRST before consuming audio
+                authority = self.profile_settings.get("authority", "human")
+                if authority == "ai" and self.ai_speaking:
+                    # Skip audio collection while AI is speaking in "ai" authority mode
+                    # Also clear the buffer to prevent stale audio from being processed
+                    vad_buffer = np.zeros(0, dtype=np.float32)
+                    energy_history.clear()
+                    self.audio_manager.get_audio_chunk()  # Consume and discard
+                    time.sleep(0.01)
+                    continue
+                
                 # Get audio chunk
                 chunk = self.audio_manager.get_audio_chunk()
                 if chunk.size == 0:
@@ -314,6 +359,11 @@ class ConversationEngine:
                 
                 now = time.time()
                 
+                # Double-check: if AI is speaking, reject this frame
+                if authority == "ai" and self.ai_speaking:
+                    vad_buffer = np.zeros(0, dtype=np.float32)
+                    continue
+                
                 # Speech detection
                 speech_started, rms = self.audio_manager.detect_speech(frame)
                 energy_history.append(rms)
@@ -322,19 +372,22 @@ class ConversationEngine:
                 if speech_started or sustained:
                     self.human_speaking_now.set()
                     
-                    # Track human speaking start time for time limit
-                    if self.human_speech_start_time is None:
+                    # **CRITICAL: Only track start time if AI is NOT currently speaking**
+                    # In "ai" authority mode, this provides absolute protection
+                    if self.human_speech_start_time is None and not self.ai_speaking:
                         self.human_speech_start_time = now
                         self.human_speaking_limit_ack_sent = False
-                        human_limit_exceeded_ack = None  # Reset for this turn
-                        self._last_debug_duration = -1  # Reset debug counter
+                        human_limit_exceeded_ack = None
+                        self._last_debug_duration = -1
                         limit_sec = self.profile_settings.get("human_speaking_limit_sec")
                         print(f"\n💬 [SPEECH START] limit_sec={limit_sec}, flag={self.human_speaking_limit_ack_sent}")
                     
-                    # Check if human has exceeded speaking time limit
-                    limit_sec = self.profile_settings.get("human_speaking_limit_sec")
-                    if limit_sec is not None:
-                        if not self.human_speaking_limit_ack_sent:
+                    # Only check limit if speech timer is actually running
+                    if self.human_speech_start_time is not None:
+                        # Check if human has exceeded speaking time limit
+                        # ONLY check if we haven't already sent the limit ack
+                        limit_sec = self.profile_settings.get("human_speaking_limit_sec")
+                        if limit_sec is not None and not self.human_speaking_limit_ack_sent:
                             speaking_duration = now - self.human_speech_start_time
                             
                             # Print every 1 second of duration
@@ -346,20 +399,20 @@ class ConversationEngine:
                                 # Select acknowledgment
                                 ack = random.choice(self.profile_settings["acknowledgments"])
                                 print(f"\n✅ LIMIT EXCEEDED ({speaking_duration:.1f}s > {limit_sec}s) → interrupting with: '{ack}'")
-                                human_limit_exceeded_ack = ack
                                 self.human_speaking_limit_ack_sent = True
                                 
                                 # INTERRUPT: Speak the acknowledgment immediately
                                 try:
                                     self.tts.speak(ack)
                                     print(f"🔊 Spoke interruption: '{ack}'")
+                                    # Don't prepend ack to transcript - already spoken
+                                    human_limit_exceeded_ack = None
                                 except Exception as e:
                                     print(f"⚠️ Failed to speak interruption: {e}")
+                                    # If TTS failed, prepend ack instead
+                                    human_limit_exceeded_ack = ack
                 else:
                     self.human_speaking_now.clear()
-                    # NOTE: Don't reset speech timer on pauses!
-                    # Pauses < 800ms are part of continuous speech.
-                    # We only reset when moving to a NEW turn (handled in turn-end logic).
                 
                 # Turn-taking state machine
                 with self.asr_lock:
@@ -372,33 +425,52 @@ class ConversationEngine:
                     partial,
                 )
                 
-                # If human exceeded speaking limit, take over on next pause (don't wait for safety timeout)
+                # If human exceeded speaking limit, take over on next pause
                 if self.human_speaking_limit_ack_sent and state == "PAUSING":
                     print(f"🎤 Limit exceeded - taking over on pause (not waiting for safety timeout)")
                     should_end_turn = True
                 
                 # Buffer audio with timestamp
+                # CRITICAL: Never buffer audio while AI is speaking in "ai" authority mode
                 if state in ("SPEAKING", "PAUSING"):
-                    self.turn_audio.append((frame.copy(), now))
+                    if not (authority == "ai" and self.ai_speaking):
+                        self.turn_audio.append((frame.copy(), now))
+                    else:
+                        print(f"🔇 [BUFFER] Skipped frame - AI is speaking")
                 
                 # End turn
                 if should_end_turn:
-                    turn_frames = list(self.turn_audio)
-                    self.turn_audio.clear()
-                    
-                    print(f"📍 Starting turn {self.turn_counter} (ack={human_limit_exceeded_ack})")
-                    # Pass the acknowledgment (if limit was exceeded) to turn processing
-                    threading.Thread(
-                        target=self._process_turn,
-                        args=(turn_frames, human_limit_exceeded_ack),
-                        daemon=True,
-                    ).start()
-                    human_limit_exceeded_ack = None  # Reset after passing
-                    
-                    # Reset speech timer for next turn (after turn processing)
-                    self.human_speech_start_time = None
-                    self.human_speaking_limit_ack_sent = False
-                    print(f"⏱️  Reset timer for next turn")
+                    # CRITICAL: Never process a turn while AI is speaking (ai authority mode)
+                    if authority == "ai" and self.ai_speaking:
+                        print(f"🔇 Discarding turn audio - AI is currently speaking")
+                        self.turn_audio.clear()
+                        vad_buffer = np.zeros(0, dtype=np.float32)
+                        energy_history.clear()
+                    else:
+                        turn_frames = list(self.turn_audio)
+                        self.turn_audio.clear()
+                        
+                        print(f"📍 Starting turn {self.turn_counter} (ack={human_limit_exceeded_ack})")
+                        # Pass the acknowledgment (if limit was exceeded) to turn processing
+                        threading.Thread(
+                            target=self._process_turn,
+                            args=(turn_frames, human_limit_exceeded_ack),
+                            daemon=True,
+                        ).start()
+                        
+                        # **ATOMIC RESET: All state resets together after turn queued**
+                        # This gives each turn a fresh 5-second budget
+                        self.turn_counter += 1
+                        human_limit_exceeded_ack = None
+                        prev_start_time = self.human_speech_start_time
+                        self.human_speech_start_time = None
+                        self.human_speaking_limit_ack_sent = False
+                        self._last_debug_duration = -1
+                        if prev_start_time is not None:
+                            tracked_duration = (now - prev_start_time)
+                            print(f"⏱️  Reset timer (was tracking for {tracked_duration:.2f}s) - fresh budget for turn {self.turn_counter}")
+                        else:
+                            print(f"⏱️  Reset timer (no prior time) - fresh budget for turn {self.turn_counter}")
         
         except KeyboardInterrupt:
             print("\n🛑 Shutting down...")
