@@ -89,7 +89,7 @@ class InstructionProfile(BaseModel):
 
 # Conversation Configuration
 CONVERSATION_START = "human"  # Options: "human" or "ai" (can be overridden per profile)
-ACTIVE_PROFILE = "ielts_instructor"  # Select which profile to use
+ACTIVE_PROFILE = "negotiator"  # Select which profile to use
 
 # Default LLM Parameters (can be overridden per profile)
 LLM_MAX_TOKENS = 80

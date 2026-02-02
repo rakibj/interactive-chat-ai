@@ -84,7 +84,10 @@ class ConversationEngine:
         self.turn_taker.safety_timeout_ms = self.profile_settings["safety_timeout_ms"]
         
         # Update interruption manager with profile-specific settings
-        self.interruption_manager.sensitivity = self.profile_settings["interruption_sensitivity"]
+        self.interruption_manager.set_profile_settings(
+            sensitivity=self.profile_settings["interruption_sensitivity"],
+            authority=self.profile_settings.get("authority", "human")
+        )
         
         self.asr = get_asr()
         self.llm = get_llm()
@@ -186,9 +189,8 @@ class ConversationEngine:
             human_limit_ack: Optional acknowledgment to prepend if limit was exceeded
         """
         # SAFEGUARD: Reject turns processed while AI was speaking in "ai" authority mode
-        authority = self.profile_settings.get("authority", "human")
-        if authority == "ai" and self.ai_speaking:
-            print(f"🛑 SAFEGUARD: Rejecting turn - AI is currently speaking (mic should be closed)")
+        if not self.interruption_manager.is_turn_processing_allowed(self.ai_speaking):
+            print(f"🛑 SAFEGUARD: Rejecting turn - AI is currently speaking (mic is closed)")
             self.human_interrupt_event.clear()
             return
         
@@ -216,7 +218,7 @@ class ConversationEngine:
             user_text = user_text.strip()
             
             # SAFEGUARD: Double-check after transcription
-            if authority == "ai" and self.ai_speaking:
+            if not self.interruption_manager.is_turn_processing_allowed(self.ai_speaking):
                 print(f"🛑 SAFEGUARD POST-TRANSCRIPTION: Discarding '{user_text}' - AI is currently speaking")
                 self.human_interrupt_event.clear()
                 return
@@ -341,8 +343,7 @@ class ConversationEngine:
         try:
             while True:
                 # Check authority mode FIRST before consuming audio
-                authority = self.profile_settings.get("authority", "human")
-                if authority == "ai" and self.ai_speaking:
+                if not self.interruption_manager.can_listen_continuously(self.ai_speaking):
                     # Skip audio collection while AI is speaking in "ai" authority mode
                     # Also clear the buffer to prevent stale audio from being processed
                     vad_buffer = np.zeros(0, dtype=np.float32)
@@ -366,8 +367,8 @@ class ConversationEngine:
                 
                 now = time.time()
                 
-                # Double-check: if AI is speaking, reject this frame
-                if authority == "ai" and self.ai_speaking:
+                # Double-check: if AI is speaking, reject this frame if logic forbids it
+                if not self.interruption_manager.can_listen_continuously(self.ai_speaking):
                     vad_buffer = np.zeros(0, dtype=np.float32)
                     continue
                 
@@ -379,18 +380,28 @@ class ConversationEngine:
                 if speech_started or sustained:
                     self.human_speaking_now.set()
                     
-                    # In "human" authority mode, detect interruption (human speaking while AI speaks)
+                    # Get partial text for interruption checks
+                    with self.asr_lock:
+                        partial_text = self.current_partial_text
+                    
+                    # Check for interruption using manager logic
+                    should_int, int_reason = self.interruption_manager.should_interrupt(
+                        ai_speaking=self.ai_speaking,
+                        current_time=now,
+                        energy_condition=sustained,
+                        detected_words=partial_text
+                    )
+
                     # ONLY set on first detection, not repeatedly
-                    if authority == "human" and self.ai_speaking and not self.human_interrupt_event.is_set():
-                        print(f"⚡ INTERRUPT: Human speech detected while AI speaking")
+                    if should_int and not self.human_interrupt_event.is_set():
+                        print(f"⚡ INTERRUPT: {int_reason}")
                         self.human_interrupt_event.set()
                     
-                    # **CRITICAL: Only track start time if AI is NOT currently speaking (in "ai" authority mode)**
-                    # In "human" authority mode, always allow speech tracking (allow interrupts)
+                    # **CRITICAL: Only track start time if we are actively listening**
                     if self.human_speech_start_time is None:
-                        # Only block if in "ai" authority AND AI is speaking
-                        if authority == "ai" and self.ai_speaking:
-                            pass  # Don't track speech during AI speaking in ai mode
+                        # Only block if logic forbids listening
+                        if not self.interruption_manager.can_listen_continuously(self.ai_speaking):
+                            pass  # Don't track speech if we shouldn't be listening
                         else:
                             self.human_speech_start_time = now
                             self.human_speaking_limit_ack_sent = False
@@ -450,15 +461,15 @@ class ConversationEngine:
                 # Buffer audio with timestamp
                 # CRITICAL: Never buffer audio while AI is speaking in "ai" authority mode
                 if state in ("SPEAKING", "PAUSING"):
-                    if not (authority == "ai" and self.ai_speaking):
+                    if self.interruption_manager.can_listen_continuously(self.ai_speaking):
                         self.turn_audio.append((frame.copy(), now))
                     else:
                         print(f"🔇 [BUFFER] Skipped frame - AI is speaking")
                 
                 # End turn
                 if should_end_turn:
-                    # CRITICAL: Never process a turn while AI is speaking (ai authority mode)
-                    if authority == "ai" and self.ai_speaking:
+                    # CRITICAL: Never process a turn if logic forbids it
+                    if not self.interruption_manager.is_turn_processing_allowed(self.ai_speaking):
                         print(f"🔇 Discarding turn audio - AI is currently speaking")
                         self.turn_audio.clear()
                         vad_buffer = np.zeros(0, dtype=np.float32)

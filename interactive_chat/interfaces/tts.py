@@ -24,13 +24,14 @@ class TTSInterface(ABC):
 class PocketTTS(TTSInterface):
     """Pocket TTS neural voice implementation."""
     
-    def __init__(self):
+    def __init__(self, voice_name: str = None):
         if not POCKET_AVAILABLE:
             raise ImportError("pocket-tts not installed. Install with: uv add pocket-tts")
         
-        print(f"⏳ Loading Pocket TTS (voice: {POCKET_VOICE})...")
+        target_voice = voice_name or POCKET_VOICE
+        print(f"⏳ Loading Pocket TTS (voice: {target_voice})...")
         self.model = TTSModel.load_model()
-        self.voice_state = self.model.get_state_for_audio_prompt(POCKET_VOICE)
+        self.voice_state = self.model.get_state_for_audio_prompt(target_voice)
         self.sample_rate = self.model.sample_rate
         print("✅ Pocket TTS loaded!")
     
@@ -85,10 +86,10 @@ class PowerShellTTS(TTSInterface):
             print(f"🔊 Speech error: {e}")
 
 
-def get_tts() -> TTSInterface:
+def get_tts(voice_name: str = None) -> TTSInterface:
     """Factory function to get appropriate TTS implementation."""
     if TTS_MODE == "pocket":
-        return PocketTTS()
+        return PocketTTS(voice_name=voice_name)
     elif TTS_MODE == "powershell":
         return PowerShellTTS()
     else:

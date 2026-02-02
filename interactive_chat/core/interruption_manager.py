@@ -1,7 +1,6 @@
 """Interruption manager with sensitivity-aware logic."""
 import time
-import threading
-from typing import Tuple
+from typing import Tuple, Optional
 from config import (
     INTERRUPT_DEBOUNCE_MS,
     INTERRUPTION_SENSITIVITY,
@@ -10,11 +9,38 @@ from config import (
 
 
 class InterruptionManager:
-    """Manages interruption detection with sensitivity control."""
+    """Manages interruption detection and authority permissions."""
     
     def __init__(self):
         self.last_interrupt_time = 0
         self.sensitivity = INTERRUPTION_SENSITIVITY
+        self.authority = "human"  # Default authority mode
+    
+    def set_profile_settings(self, sensitivity: float, authority: str) -> None:
+        """Update settings from active profile."""
+        self.sensitivity = max(0.0, min(1.0, sensitivity))
+        self.authority = authority
+        
+    def can_listen_continuously(self, ai_speaking: bool) -> bool:
+        """
+        Determine if the system should be listening to the microphone.
+        
+        In 'ai' authority mode, we close the mic (effectively) while AI is speaking
+        to prevent any interruptions or noise processing.
+        """
+        if self.authority == "ai" and ai_speaking:
+            return False
+        return True
+
+    def is_turn_processing_allowed(self, ai_speaking: bool) -> bool:
+        """
+        Determine if we should process a completed turn.
+        
+        SAFEGUARD: In 'ai' authority mode, never process user speech if AI is speaking.
+        """
+        if self.authority == "ai" and ai_speaking:
+            return False
+        return True
     
     def should_interrupt(
         self,
@@ -29,6 +55,12 @@ class InterruptionManager:
         Returns:
             (should_interrupt, reason_string)
         """
+        # 1. Authority Check: If AI has authority, NO interruptions allowed (unless we stay permissive for 'Stop')
+        # CURRENT IMPL: logical deafness in main loop usually prevents us getting here in 'ai' mode,
+        # but as a safeguard:
+        if self.authority == "ai":
+            return False, "authority is ai"
+
         now_ms = current_time * 1000
         
         # Only consider interruption when AI is actually speaking
@@ -75,7 +107,4 @@ class InterruptionManager:
             self.last_interrupt_time = now_ms
         
         return should_interrupt, reason
-    
-    def set_sensitivity(self, sensitivity: float) -> None:
-        """Set interruption sensitivity (0.0 = strict, 1.0 = responsive)."""
-        self.sensitivity = max(0.0, min(1.0, sensitivity))
+

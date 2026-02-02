@@ -2,7 +2,12 @@
 from abc import ABC, abstractmethod
 from typing import Iterator
 from openai import OpenAI
-from llama_cpp import Llama
+try:
+    from llama_cpp import Llama
+    LLAMA_CPP_AVAILABLE = True
+except ImportError:
+    Llama = None
+    LLAMA_CPP_AVAILABLE = False
 import os
 from config import (
     LLM_BACKEND,
@@ -39,6 +44,8 @@ class LocalLLM(LLMInterface):
     """Local LLaMA.cpp implementation."""
     
     def __init__(self):
+        if not LLAMA_CPP_AVAILABLE:
+            raise ImportError("llama-cpp-python is not installed. Use a cloud backend or install: uv add llama-cpp-python")
         print("⏳ Loading Qwen2.5-3B (Q5_K_M GGUF) on CPU...")
         try:
             self.model = Llama(
