@@ -34,8 +34,16 @@ from config import (
     ACTIVE_PROFILE,
     get_system_prompt,
     get_profile_settings,
+    PROJECT_ROOT,
 )
-from core import AudioManager, TurnTaker, InterruptionManager, ConversationMemory
+from core import (
+    AudioManager,
+    TurnTaker,
+    InterruptionManager,
+    ConversationMemory,
+    TurnAnalytics,
+    SessionAnalytics,
+)
 from interfaces import get_asr, get_llm, get_tts
 
 
@@ -110,6 +118,16 @@ class ConversationEngine:
         self.asr_lock = threading.Lock()
         self.shutdown_event = threading.Event()  # Signal for graceful shutdown
         
+        # Analytics
+        self.session_analytics = SessionAnalytics(
+            profile_name=self.profile_settings["name"],
+            logs_dir=PROJECT_ROOT / "logs"
+        )
+        self.current_turn_analytics = None  # Populated per turn
+        self.turn_start_time = None
+        self.ai_speech_start_time = None
+        self.force_ended = False  # Track if current turn was force-ended
+        
         # Start threads
         self._start_tts_worker()
         self._start_asr_worker()
@@ -145,6 +163,7 @@ class ConversationEngine:
                     continue
                 
                 self.ai_speaking = True
+                self.ai_speech_start_time = time.time()
                 try:
                     if text:
                         # Determine if we should allow immediate interruption based on Authority
@@ -162,9 +181,15 @@ class ConversationEngine:
                     
                     self.response_queue.task_done()
                 finally:
+                    # Track AI speech duration
+                    if self.ai_speech_start_time and self.current_turn_analytics:
+                        ai_duration = time.time() - self.ai_speech_start_time
+                        self.current_turn_analytics.ai_speech_duration_sec += ai_duration
+                    
                     # Wait a brief moment to ensure TTS is completely done
                     time.sleep(0.2)
                     self.ai_speaking = False
+                    self.ai_speech_start_time = None
                     print(f"🤐 AI finished speaking, mic reopened")
             
             except queue.Empty:
@@ -195,12 +220,13 @@ class ConversationEngine:
             self.ai_speaking = True  # Set flag BEFORE queuing to avoid race condition
             self.response_queue.put(greeting.strip())
     
-    def _process_turn(self, turn_audio_frames: List, human_limit_ack: str = None) -> None:
+    def _process_turn(self, turn_audio_frames: List, human_limit_ack: str = None, end_state: str = None) -> None:
         """Process a complete conversation turn.
         
         Args:
             turn_audio_frames: List of audio frames from this turn
             human_limit_ack: Optional acknowledgment to prepend if limit was exceeded
+            end_state: State that triggered turn end (for analytics)
         """
         # SAFEGUARD: Reject turns processed while AI was speaking in "ai" authority mode
         if not self.interruption_manager.is_turn_processing_allowed(self.ai_speaking):
@@ -258,10 +284,34 @@ class ConversationEngine:
             timing.total_audio_duration_sec = full_audio.shape[0] / 16000.0
             timing.whisper_rtf = timing.whisper_transcribe_ms / (timing.total_audio_duration_sec * 1000)
             
+            # Update analytics
+            if self.current_turn_analytics:
+                self.current_turn_analytics.human_speech_duration_sec = timing.total_audio_duration_sec
+                self.current_turn_analytics.transcription_ms = timing.whisper_transcribe_ms
+                self.current_turn_analytics.final_transcript_length = len(user_text)
+                self.current_turn_analytics.human_transcript = user_text
+                self.current_turn_analytics.transcript_timestamp = time.time()
+            
             if not user_text:
                 print("⚠️ Empty transcription — skipping response")
                 self.human_interrupt_event.clear()
                 return
+            
+            # Check if human interrupted during AI response (Default authority only)
+            if self.interruption_manager.authority == "default" and self.human_interrupt_event.is_set():
+                print(f"🔄 Human interrupted - clearing AI response and saying 'Go ahead'")
+                # Clear response queue
+                while not self.response_queue.empty():
+                    try:
+                        self.response_queue.get_nowait()
+                    except queue.Empty:
+                        break
+                
+                # Queue "Go ahead" instead
+                self.ai_speaking = True  # Set flag before queueing
+                self.response_queue.put("Go ahead.")
+                self.human_interrupt_event.clear()
+                return  # Skip normal processing
             
             # Add to memory
             self.conversation_memory.add_message("user", user_text)
@@ -319,6 +369,24 @@ class ConversationEngine:
             timing.total_latency_ms = (time.perf_counter() - timing.speech_end_time) * 1000
             timing.print_report()
             self.timing_history.append(timing)
+            
+            # Finalize analytics
+            if self.current_turn_analytics:
+                self.current_turn_analytics.llm_generation_ms = timing.llm_generate_ms
+                self.current_turn_analytics.total_latency_ms = timing.total_latency_ms
+                self.current_turn_analytics.ai_transcript = full_response_text
+                
+                # Determine end reason
+                if end_state == "ENDING":
+                    self.current_turn_analytics.end_reason = "silence"
+                elif human_limit_ack:
+                    self.current_turn_analytics.end_reason = "forced_cutoff"
+                else:
+                    self.current_turn_analytics.end_reason = "safety_timeout"
+                
+                # Log turn
+                self.session_analytics.log_turn(self.current_turn_analytics)
+            
             # NOTE: turn_counter is incremented in run() loop, not here
             self.human_interrupt_event.clear()
         
@@ -406,10 +474,19 @@ class ConversationEngine:
                         detected_words=partial_text
                     )
 
+                    # Track interruption attempts
+                    if should_int and self.current_turn_analytics:
+                        self.current_turn_analytics.interrupt_attempts += 1
+                        self.current_turn_analytics.interrupt_trigger_reasons.append(int_reason)
+                    
                     # ONLY set on first detection, not repeatedly
                     if should_int and not self.human_interrupt_event.is_set():
                         print(f"⚡ INTERRUPT: {int_reason}")
                         self.human_interrupt_event.set()
+                        if self.current_turn_analytics:
+                            self.current_turn_analytics.interrupts_accepted += 1
+                    elif should_int and self.current_turn_analytics:
+                        self.current_turn_analytics.interrupts_blocked += 1
                     
                     # **CRITICAL: Only track start time if we are actively listening**
                     if self.human_speech_start_time is None:
@@ -449,6 +526,21 @@ class ConversationEngine:
                                     print(f"🔊 Spoke interruption: '{ack}'")
                                     # Don't prepend ack to transcript - already spoken
                                     human_limit_exceeded_ack = None
+                                    
+                                    # CRITICAL: Clear buffers to prevent immediate second turn
+                                    # The audio buffer still contains frames that would trigger
+                                    # another turn immediately after this one completes
+                                    print(f"🧹 Clearing buffers after limit acknowledgment")
+                                    self.turn_audio.clear()
+                                    vad_buffer = np.zeros(0, dtype=np.float32)
+                                    energy_history.clear()
+                                    self.turn_taker.reset()
+                                    # Reset speech tracking to prevent safety timeout
+                                    self.human_speech_start_time = None
+                                    self._last_debug_duration = -1
+                                    # NOTE: Do NOT reset human_speaking_limit_ack_sent here
+                                    # It will be reset when the turn actually ends
+                                    
                                 except Exception as e:
                                     print(f"⚠️ Failed to speak interruption: {e}")
                                     # If TTS failed, prepend ack instead
@@ -465,7 +557,15 @@ class ConversationEngine:
                     sustained,
                     now,
                     partial,
+                    authority=self.interruption_manager.authority,  # Pass authority
                 )
+                
+                # Track if this is a force end
+                if should_end_turn and state == "PAUSING":
+                    elapsed = (now - self.human_speech_start_time) * 1000 if self.human_speech_start_time else 0
+                    if elapsed >= self.turn_taker.safety_timeout_ms:
+                        self.force_ended = True
+                        print(f"⚠️ Turn force-ended - mic will close")
                 
                 # If human exceeded speaking limit, take over on next pause
                 if self.human_speaking_limit_ack_sent and state == "PAUSING":
@@ -474,8 +574,12 @@ class ConversationEngine:
                 
                 # Buffer audio with timestamp
                 # CRITICAL: Never buffer audio while AI is speaking in "ai" authority mode
+                # CRITICAL: Never buffer audio after force end
                 if state in ("SPEAKING", "PAUSING"):
-                    if self.interruption_manager.can_listen_continuously(self.ai_speaking):
+                    if self.force_ended:
+                        # Reject audio after force end
+                        print(f"🚫 Rejecting audio - turn was force-ended")
+                    elif self.interruption_manager.can_listen_continuously(self.ai_speaking):
                         self.turn_audio.append((frame.copy(), now))
                     else:
                         print(f"🔇 [BUFFER] Skipped frame - AI is speaking")
@@ -488,15 +592,47 @@ class ConversationEngine:
                         self.turn_audio.clear()
                         vad_buffer = np.zeros(0, dtype=np.float32)
                         energy_history.clear()
+                        self.human_speech_start_time = None
+                        self.force_ended = False  # Reset force end flag
                     else:
                         turn_frames = list(self.turn_audio)
                         self.turn_audio.clear()
+                        
+                        # Reset force end flag for next turn
+                        self.force_ended = False
+                        
+                        # Initialize turn analytics
+                        self.turn_start_time = time.time()
+                        self.current_turn_analytics = TurnAnalytics(
+                            turn_id=self.turn_counter,
+                            timestamp=self.turn_start_time,
+                            profile_name=self.profile_settings["name"],
+                            human_speech_duration_sec=0.0,
+                            ai_speech_duration_sec=0.0,
+                            silence_before_end_ms=0.0,
+                            interrupt_attempts=0,
+                            interrupts_accepted=0,
+                            interrupts_blocked=0,
+                            interrupt_trigger_reasons=[],
+                            end_reason="unknown",
+                            authority_mode=self.interruption_manager.authority,
+                            sensitivity_value=self.profile_settings["interruption_sensitivity"],
+                            partial_transcript_lengths=[],
+                            final_transcript_length=0,
+                            confidence_score_at_cutoff=0.0,
+                            transcription_ms=0.0,
+                            llm_generation_ms=0.0,
+                            total_latency_ms=0.0,
+                            human_transcript="",
+                            ai_transcript="",
+                            transcript_timestamp=0.0,
+                        )
                         
                         print(f"📍 Starting turn {self.turn_counter} (ack={human_limit_exceeded_ack})")
                         # Pass the acknowledgment (if limit was exceeded) to turn processing
                         threading.Thread(
                             target=self._process_turn,
-                            args=(turn_frames, human_limit_exceeded_ack),
+                            args=(turn_frames, human_limit_exceeded_ack, state),
                             daemon=True,
                         ).start()
                         
@@ -520,6 +656,10 @@ class ConversationEngine:
             self.shutdown_event.set()  # Signal all threads to stop
             self.audio_manager.stop()
             time.sleep(0.2)  # Allow threads to finish gracefully
+            
+            # Generate analytics summary
+            self.session_analytics.save_summary()
+            
             print("✅ Goodbye!")
         except Exception as e:
             print(f"\n❌ FATAL ERROR in main loop: {e}")

@@ -31,12 +31,30 @@ class TurnTaker:
         """Update energy history."""
         self.energy_history.append(rms)
     
+    def should_force_end(self, authority: str, elapsed_ms: float) -> bool:
+        """Determine if turn should be force-ended based on authority.
+        
+        Args:
+            authority: "human", "ai", or "default"
+            elapsed_ms: Time since last voice activity
+        
+        Returns:
+            True if turn should be force-ended
+        """
+        if authority == "human":
+            # Human authority: Never force end
+            return False
+        
+        # Default and AI authority: Use safety timeout
+        return elapsed_ms >= self.safety_timeout_ms
+    
     def process_state(
         self,
         speech_started: bool,
         sustained: bool,
         current_time: float,
         current_partial_text: str = "",
+        authority: str = "default",
     ) -> Tuple[str, bool]:
         """
         Process turn-taking state machine.
@@ -62,8 +80,8 @@ class TurnTaker:
         elif self.state == "PAUSING":
             elapsed_ms = (current_time - self.last_voice_time) * 1000
             
-            # SAFETY TIMEOUT: Force end if taking too long
-            if elapsed_ms > self.safety_timeout_ms:
+            # SAFETY TIMEOUT: Force end if taking too long (authority-aware)
+            if self.should_force_end(authority, elapsed_ms):
                 print(f"🔴 SAFETY TIMEOUT: Forced turn end after {elapsed_ms:.0f}ms")
                 should_end_turn = True
                 self.reset()

@@ -89,7 +89,7 @@ class InstructionProfile(BaseModel):
 
 # Conversation Configuration
 CONVERSATION_START = "human"  # Options: "human" or "ai" (can be overridden per profile)
-ACTIVE_PROFILE = "negotiator"  # Select which profile to use
+ACTIVE_PROFILE = "confused_customer"  # Select which profile to use
 
 # Default LLM Parameters (can be overridden per profile)
 LLM_MAX_TOKENS = 80
@@ -126,7 +126,7 @@ INSTRUCTION_PROFILES = {
         safety_timeout_ms=2500,
         interruption_sensitivity=0.6,
         authority="default",
-        human_speaking_limit_sec=45,
+        human_speaking_limit_sec=5,
         acknowledgments=[
             "Okay.",
             "Noted.",
@@ -194,7 +194,7 @@ TONE: Professional, encouraging, supportive.""",
     
     "confused_customer": InstructionProfile(
         name="Confused Customer",
-        start="ai",
+        start="human",
         voice="marius",
         max_tokens=90,
         temperature=0.7,
@@ -203,7 +203,7 @@ TONE: Professional, encouraging, supportive.""",
         safety_timeout_ms=2800,
         interruption_sensitivity=0.5,
         authority="human",
-        human_speaking_limit_sec=None,
+        human_speaking_limit_sec=5,
         acknowledgments=[
             "I understand.",
             "Okay, let me clarify.",

@@ -331,6 +331,129 @@ TURN_END_ASR_MODE = "cloud"  # or "local"
 LLM_BACKEND = "groq"  # or "local", "openai", "deepseek"
 ```
 
+## Turn Analytics System
+
+### Purpose
+Structured logging for conversation behavior to enable data-driven tuning of interruption sensitivity, pause thresholds, and confidence scores.
+
+### Components
+
+**`core/analytics.py`**:
+- `TurnAnalytics` dataclass: 40+ metrics per turn
+- `SessionAnalytics` class: JSONL logging and summary generation
+
+**Metrics Tracked**:
+- **Timing**: Human/AI speech duration, silence before turn end
+- **Interruptions**: Attempts, accepted/blocked counts, trigger reasons
+- **Turn Decisions**: End reason, authority mode, sensitivity value
+- **ASR Signals**: Partial transcript lengths, final length, confidence score
+- **Latency**: Transcription, LLM generation, total
+- **Transcripts**: Full human and AI text with timestamps
+
+### Output Files
+
+**Per-Turn JSONL** (`logs/session_YYYYMMDD_HHMMSS.jsonl`):
+```json
+{
+  "turn_id": 0,
+  "human_transcript": "Hey, how's it going?",
+  "ai_transcript": "Not bad, just looking at this laptop.",
+  "transcript_timestamp": 1738515601.234,
+  "interrupt_attempts": 2,
+  "interrupts_accepted": 1,
+  "end_reason": "silence",
+  "total_latency_ms": 1471.0
+}
+```
+
+**Session Summary** (`logs/session_YYYYMMDD_HHMMSS_summary.json`):
+```json
+{
+  "total_turns": 15,
+  "avg_total_latency_ms": 1370.7,
+  "interrupt_acceptance_rate": 0.75,
+  "end_reason_distribution": {"silence": 10, "safety_timeout": 5}
+}
+```
+
+### Analysis Examples
+```bash
+# View per-turn data
+cat logs/session_*.jsonl | jq .
+
+# Extract conversation transcript
+cat logs/session_*.jsonl | jq -r '"[\(.turn_id)] Human: \(.human_transcript)\nAI: \(.ai_transcript)\n"'
+
+# Find high-latency turns
+cat logs/session_*.jsonl | jq 'select(.total_latency_ms > 2000)'
+```
+
+## Authority-Specific Turn Ending Behavior
+
+### Overview
+The system implements different turn-ending behaviors based on the active authority mode to ensure appropriate conversation flow control.
+
+### Authority Modes
+
+**Human Authority** (`authority="human"`):
+- **Force End**: Disabled (safety timeout never triggers)
+- **Turn End**: Only when human stops speaking naturally (silence detection)
+- **Mic**: Always on during human turn
+- **Speaking Limit**: If configured, speaks acknowledgment once but allows turn to continue
+- **Use Case**: User has full control, AI never cuts them off
+
+**Default Authority** (`authority="default"`):
+- **Force End**: Enabled (safety timeout active, default 2500ms)
+- **Turn End**: Silence detection or safety timeout
+- **Mic**: Always on
+- **Interruption**: If human interrupts AI, AI stops and says "Go ahead"
+- **Use Case**: Balanced conversation, polite interruption handling
+
+**AI Authority** (`authority="ai"`):
+- **Force End**: Enabled (safety timeout active)
+- **Turn End**: Silence detection or safety timeout
+- **Mic**: Off during AI speech (no audio buffering)
+- **Interruption**: Not allowed during AI speech
+- **Use Case**: AI controls conversation flow (e.g., IELTS examiner)
+
+### Implementation Details
+
+**TurnTaker.should_force_end()**:
+```python
+def should_force_end(self, authority: str, elapsed_ms: float) -> bool:
+    if authority == "human":
+        return False  # Never force end
+    return elapsed_ms >= self.safety_timeout_ms
+```
+
+**Post-Force-End Audio Rejection**:
+- After safety timeout triggers, `force_ended` flag is set
+- All subsequent audio frames are rejected until turn completes
+- Prevents buffer overflow and turn confusion
+
+**"Go Ahead" Fallback (Default Authority)**:
+- When human interrupts AI during response generation
+- AI response queue is cleared
+- "Go ahead" is queued instead
+- Allows human to continue smoothly
+
+### Human Speaking Limit
+
+**Purpose**: Prevent monologues in AI-authority modes or provide gentle reminders.
+
+**Behavior**:
+1. When limit exceeded, AI speaks random acknowledgment from profile list
+2. Acknowledgment is spoken immediately (interrupts user)
+3. Buffers are cleared to prevent duplicate turns
+4. Flag prevents repeated acknowledgments in same turn
+5. Turn continues until user naturally stops (human authority) or timeout (default/ai authority)
+
+**Configuration**:
+```python
+human_speaking_limit_sec=45  # Seconds, or None to disable
+acknowledgments=["Okay.", "Noted.", "Got it."]
+```
+
 ## Known Limitations
 1. **PowerShellTTS**: Cannot interrupt mid-sentence (blocking API)
 2. **Vosk Accuracy**: Partial transcripts less accurate than Whisper
