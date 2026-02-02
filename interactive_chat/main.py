@@ -146,7 +146,21 @@ class ConversationEngine:
                 
                 self.ai_speaking = True
                 try:
-                    self.tts.speak(text)
+                    if text:
+                        # Determine if we should allow immediate interruption based on Authority
+                        # HUMAN Authority -> Immediate Stop (Barge-in)
+                        # DEFAULT Authority -> Polite Stop (Finish sentence)
+                        # AI Authority -> Ignored (Handled by Manager, but if here, safeguard)
+                        
+                        current_authority = self.interruption_manager.authority
+                        event_to_pass = None
+                        
+                        if current_authority == "human":
+                            event_to_pass = self.human_interrupt_event
+                        
+                        self.tts.speak(text, interrupt_event=event_to_pass)
+                    
+                    self.response_queue.task_done()
                 finally:
                     # Wait a brief moment to ensure TTS is completely done
                     time.sleep(0.2)

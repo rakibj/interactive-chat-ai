@@ -12,12 +12,14 @@ except ImportError:
     POCKET_AVAILABLE = False
 
 
+import threading
+
 class TTSInterface(ABC):
     """Abstract base for TTS implementations."""
     
     @abstractmethod
-    def speak(self, text: str) -> None:
-        """Speak text aloud."""
+    def speak(self, text: str, interrupt_event: threading.Event = None) -> None:
+        """Speak text aloud. Optional interrupt_event to stop mid-speech."""
         pass
 
 
@@ -35,12 +37,16 @@ class PocketTTS(TTSInterface):
         self.sample_rate = self.model.sample_rate
         print("✅ Pocket TTS loaded!")
     
-    def speak(self, text: str) -> None:
+    def speak(self, text: str, interrupt_event: threading.Event = None) -> None:
         """Generate and play audio using Pocket TTS."""
         if not text.strip():
             return
         
         try:
+            # Check before generating (optimization)
+            if interrupt_event and interrupt_event.is_set():
+                return
+
             audio = self.model.generate_audio(self.voice_state, text)
             audio_np = audio.numpy() if hasattr(audio, "numpy") else np.array(audio)
             
@@ -54,6 +60,12 @@ class PocketTTS(TTSInterface):
             stream.start()
             
             for i in range(0, len(audio_np), chunk_size):
+                # Check interruption status inside the loop
+                if interrupt_event and interrupt_event.is_set():
+                    stream.stop()
+                    stream.close()
+                    return
+
                 chunk = audio_np[i : i + chunk_size]
                 stream.write(chunk)
             
@@ -67,7 +79,7 @@ class PocketTTS(TTSInterface):
 class PowerShellTTS(TTSInterface):
     """Windows PowerShell system TTS (fallback)."""
     
-    def speak(self, text: str) -> None:
+    def speak(self, text: str, interrupt_event: threading.Event = None) -> None:
         """Use Windows PowerShell for text-to-speech."""
         if not text.strip():
             return
