@@ -125,7 +125,7 @@ INSTRUCTION_PROFILES = {
         end_ms=1200,
         safety_timeout_ms=2500,
         interruption_sensitivity=0.6,
-        authority="human",
+        authority="default",
         human_speaking_limit_sec=45,
         acknowledgments=[
             "Okay.",
