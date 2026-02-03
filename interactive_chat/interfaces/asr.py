@@ -57,7 +57,6 @@ class VoskRealtime(RealtimeASR):
     def __init__(self):
         from vosk import Model, KaldiRecognizer
         
-        print("Loading Vosk (for real-time streaming)...")
         vosk_model = Model(VOSK_MODEL_PATH)
         self.recognizer = KaldiRecognizer(vosk_model, SAMPLE_RATE)
         self.recognizer.SetWords(True)
@@ -95,7 +94,6 @@ class WhisperLocalASR(TurnEndASR):
     """
     
     def __init__(self):
-        print("Loading Whisper (local model for final transcription)...")
         self.model = WhisperModel(
             WHISPER_MODEL_PATH,
             device="cpu",
@@ -141,7 +139,6 @@ class WhisperCloudASR(TurnEndASR):
                 "Set it or use WhisperLocalASR instead."
             )
         
-        print(f"Using OpenAI Whisper Cloud ({WHISPER_CLOUD_MODEL}) for final transcription...")
         self.client = OpenAI(api_key=OPENAI_API_KEY)
         self.model = WHISPER_CLOUD_MODEL
     

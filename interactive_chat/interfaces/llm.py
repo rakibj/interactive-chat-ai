@@ -1,6 +1,12 @@
-"""Abstract LLM interface and implementations (Groq/OpenAI/local)."""
+"""Abstract LLM interface and implementations (Groq/OpenAI/local).
+
+Features:
+- Stream-based token generation
+- Optional signal emission for LLM lifecycle events
+- Structured output support (extracts JSON/signals from response)
+"""
 from abc import ABC, abstractmethod
-from typing import Iterator
+from typing import Iterator, Optional, Dict, Any
 from openai import OpenAI
 try:
     from llama_cpp import Llama
@@ -9,6 +15,8 @@ except ImportError:
     Llama = None
     LLAMA_CPP_AVAILABLE = False
 import os
+import json
+import re
 from config import (
     LLM_BACKEND,
     GGUF_MODEL_PATH,
@@ -22,8 +30,53 @@ from config import (
     GROQ_MODEL,
     DEEPSEEK_MODEL,
 )
+from core.signals import emit_signal, SignalName
 
 os.environ["LLAMA_CPP_LOG_LEVEL"] = "ERROR"
+
+
+def extract_signals_from_response(response: str) -> Dict[str, Any]:
+    """
+    Extract structured signals from LLM response.
+    
+    Format: LLM may include a <signals> block in its response:
+    
+        Thanks, I have everything I need.
+        
+        <signals>
+        {
+          "intake.user_data_collected": {
+            "confidence": 0.92,
+            "fields": ["email", "name"]
+          }
+        }
+        </signals>
+    
+    This function extracts the JSON block (if present) and returns it.
+    Malformed signals are silently ignored to prevent LLM issues from crashing core.
+    
+    Args:
+        response: Full LLM response text
+    
+    Returns:
+        Dictionary of signals, or empty dict if none found
+    """
+    try:
+        # Look for <signals>...</signals> block
+        match = re.search(r"<signals>\s*(\{.*?\})\s*</signals>", response, re.DOTALL)
+        if not match:
+            return {}
+        
+        signals_json = match.group(1)
+        signals = json.loads(signals_json)
+        
+        # Validate structure: should be {signal_name: {payload}}
+        if isinstance(signals, dict):
+            return signals
+        return {}
+    except (json.JSONDecodeError, AttributeError) as e:
+        # Silently ignore malformed signals
+        return {}
 
 
 class LLMInterface(ABC):
@@ -35,8 +88,20 @@ class LLMInterface(ABC):
         messages: list,
         max_tokens: int,
         temperature: float,
+        emit_signals: bool = True,
     ) -> Iterator[str]:
-        """Stream chat completion, yielding text tokens."""
+        """
+        Stream chat completion, yielding text tokens.
+        
+        Args:
+            messages: Message history
+            max_tokens: Max response length
+            temperature: Response creativity (0.0-1.0)
+            emit_signals: If True, emit llm.generation_start/complete signals
+        
+        Yields:
+            Text tokens as they arrive
+        """
         pass
 
 
@@ -70,18 +135,55 @@ class LocalLLM(LLMInterface):
         messages: list,
         max_tokens: int,
         temperature: float,
+        emit_signals: bool = True,
     ) -> Iterator[str]:
-        """Stream completion from local model."""
-        stream = self.model.create_chat_completion(
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            stream=True,
-        )
-        for chunk in stream:
-            delta = chunk["choices"][0].get("delta", {})
-            if "content" in delta:
-                yield delta["content"]
+        """Stream completion from local model with optional signal emission."""
+        if emit_signals:
+            emit_signal(
+                SignalName.LLM_GENERATION_START,
+                payload={"model": "qwen2.5-3b", "backend": "local"},
+                context={"source": "local_llm"},
+            )
+        
+        try:
+            stream = self.model.create_chat_completion(
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                stream=True,
+            )
+            response_text = ""
+            for chunk in stream:
+                delta = chunk["choices"][0].get("delta", {})
+                if "content" in delta:
+                    token = delta["content"]
+                    response_text += token
+                    yield token
+            
+            if emit_signals:
+                # Emit generation_complete signal
+                emit_signal(
+                    SignalName.LLM_GENERATION_COMPLETE,
+                    payload={"tokens_generated": max_tokens, "backend": "local"},
+                    context={"source": "local_llm"},
+                )
+                
+                # Extract and emit any signals from response
+                signals_dict = extract_signals_from_response(response_text)
+                for signal_name, signal_payload in signals_dict.items():
+                    emit_signal(
+                        signal_name,
+                        payload=signal_payload,
+                        context={"source": "llm_response", "backend": "local"},
+                    )
+        except Exception as e:
+            if emit_signals:
+                emit_signal(
+                    SignalName.LLM_GENERATION_ERROR,
+                    payload={"error": str(e)},
+                    context={"source": "local_llm"},
+                )
+            raise
 
 
 class CloudLLM(LLMInterface):
@@ -119,26 +221,62 @@ class CloudLLM(LLMInterface):
         messages: list,
         max_tokens: int,
         temperature: float,
+        emit_signals: bool = True,
     ) -> Iterator[str]:
-        """Stream completion from cloud LLM."""
-        stream = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            stream=True,
-        )
+        """Stream completion from cloud LLM with optional signal emission."""
+        if emit_signals:
+            emit_signal(
+                SignalName.LLM_GENERATION_START,
+                payload={"model": self.model, "backend": self.backend},
+                context={"source": "cloud_llm"},
+            )
         
-        for event in stream:
-            if not event.choices:
-                continue
+        try:
+            stream = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                stream=True,
+            )
             
-            delta = event.choices[0].delta
-            if not delta:
-                continue
+            response_text = ""
+            for event in stream:
+                if not event.choices:
+                    continue
+                
+                delta = event.choices[0].delta
+                if not delta:
+                    continue
+                
+                if hasattr(delta, "content") and delta.content is not None:
+                    response_text += delta.content
+                    yield delta.content
             
-            if hasattr(delta, "content") and delta.content is not None:
-                yield delta.content
+            if emit_signals:
+                # Emit generation_complete signal
+                emit_signal(
+                    SignalName.LLM_GENERATION_COMPLETE,
+                    payload={"tokens_generated": max_tokens, "backend": self.backend},
+                    context={"source": "cloud_llm"},
+                )
+                
+                # Extract and emit any signals from response
+                signals_dict = extract_signals_from_response(response_text)
+                for signal_name, signal_payload in signals_dict.items():
+                    emit_signal(
+                        signal_name,
+                        payload=signal_payload,
+                        context={"source": "llm_response", "backend": self.backend},
+                    )
+        except Exception as e:
+            if emit_signals:
+                emit_signal(
+                    SignalName.LLM_GENERATION_ERROR,
+                    payload={"error": str(e)},
+                    context={"source": "cloud_llm"},
+                )
+            raise
 
 
 # Cache for cloud clients

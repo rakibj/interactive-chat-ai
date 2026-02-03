@@ -2,6 +2,7 @@ from enum import Enum
 from dataclasses import dataclass, field
 from typing import List, Optional, Any, Dict, Tuple
 import time
+from .signals import emit_signal, SignalName
 
 class EventType(Enum):
     """Enumeration of all system events."""
@@ -142,8 +143,17 @@ class Reducer:
                         state.ai_speech_queue.clear()
                         actions.append(Action(ActionType.INTERRUPT_AI, {"reason": reason}))
                         actions.append(Action(ActionType.LOG, {"message": f"⚡ INTERRUPT: {reason}"}))
-                    # Add a log for why it DIDN'T interrupt if we want to be very verbose, 
-                    # but let's stick to state changes for now.
+                        
+                        # Emit signal for interruption (listeners can react)
+                        emit_signal(
+                            SignalName.CONVERSATION_INTERRUPTED,
+                            payload={
+                                "reason": reason,
+                                "turn_id": state.turn_id,
+                                "authority": state.authority,
+                            },
+                            context={"source": "reducer"},
+                        )
 
         elif event.type == EventType.ASR_PARTIAL_TRANSCRIPT:
             if Reducer._is_mic_muted(state):
@@ -153,7 +163,7 @@ class Reducer:
             state.current_partial_transcript = text
             if text:
                 state.turn_partial_transcripts.append(text)
-                actions.append(Action(ActionType.LOG, {"message": f"📝 ASR Partial: '{text}'"}))
+                # Suppress ASR partial logs to reduce noise
             
         elif event.type == EventType.AI_SENTENCE_READY:
             text = event.payload.get("text")
@@ -179,7 +189,7 @@ class Reducer:
             
             # Log turn analytics if we have a recorded turn
             if state.turn_start_time and state.turn_final_transcript:
-                actions.append(Action(ActionType.LOG_TURN, {
+                turn_metrics = {
                     "turn_id": state.turn_id,
                     "timestamp": state.turn_start_time,
                     "interrupt_attempts": state.turn_interrupt_attempts,
@@ -192,7 +202,19 @@ class Reducer:
                     "llm_generation_ms": state.turn_llm_generation_ms,
                     "total_latency_ms": state.turn_total_latency_ms,
                     "confidence_score": state.turn_confidence_score,
-                }))
+                }
+                
+                actions.append(Action(ActionType.LOG_TURN, turn_metrics))
+                
+                # Emit signal for turn completion (listeners can react to this)
+                emit_signal(
+                    SignalName.ANALYTICS_TURN_METRICS,
+                    payload=turn_metrics,
+                    context={
+                        "source": "reducer",
+                        "turn_id": state.turn_id,
+                    },
+                )
             
             # Reset turn metrics
             state.turn_audio_buffer.clear()
@@ -250,6 +272,18 @@ class Reducer:
             if duration > state.human_speaking_limit_sec:
                 state.human_speaking_limit_ack_sent = True
                 actions.append(Action(ActionType.PLAY_ACK, {"reason": "limit_exceeded"}))
+                
+                # Emit signal for speaking limit exceeded
+                emit_signal(
+                    SignalName.CONVERSATION_SPEAKING_LIMIT_EXCEEDED,
+                    payload={
+                        "limit_sec": state.human_speaking_limit_sec,
+                        "actual_duration_sec": duration,
+                        "turn_id": state.turn_id,
+                    },
+                    context={"source": "reducer"},
+                )
+                
                 # In event-driven, we might force a turn end or just play ack
                 if state.state_machine == "PAUSING":
                      state.turn_end_reason = "limit_exceeded"

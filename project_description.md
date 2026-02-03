@@ -4,6 +4,14 @@
 
 A real-time voice conversation system with configurable AI personas, advanced interruption handling, and multi-modal ASR/TTS capabilities. Built for natural, low-latency human-AI voice interactions with sophisticated turn-taking logic.
 
+**Key Features**:
+
+- Event-driven architecture with deterministic state machine reducer
+- Decoupled signals layer for optional plugin/dashboard integration without core modification
+- Multi-authority modes (human, AI, default) with profile-based turn-taking
+- Human speaking limit enforcement for controlled conversation dynamics
+- Comprehensive analytics with per-turn metrics logging
+
 ## Technology Stack
 
 ### Core Dependencies
@@ -45,12 +53,13 @@ interactive-chat-ai/
 │   ├── config.py               # Centralized configuration
 │   ├── core/
 │   │   ├── event_driven_core.py # Core state, events, and reducer
+│   │   ├── signals.py          # Signals architecture (observations layer)
 │   │   ├── audio_manager.py    # Audio I/O and VAD
 │   │   ├── conversation_memory.py   # Chat history
 │   │   └── analytics.py        # Telemetry
 │   └── interfaces/
 │       ├── asr.py              # ASR implementations
-│       ├── llm.py              # LLM implementations
+│       ├── llm.py              # LLM implementations (with signal emission)
 │       └── tts.py              # TTS implementations
 ├── models/                     # Local model storage
 └── test_*.py                   # Test scripts
@@ -144,6 +153,37 @@ SystemState now tracks per-turn metrics for automatic analytics logging:
 4. **Processing**: PROCESS_TURN action triggers `_process_turn_async()` with timing capture
 5. **Logging**: RESET_TURN event emits LOG_TURN action with complete metrics
 6. **Output**: LOG_TURN handler calls `session_analytics.log_turn()`
+
+### 3. Signals & Observability (`core/signals.py` + LLM Response Signals)
+
+**Purpose**: Two-tier signal system combining framework signals (state changes, analytics) with LLM-emitted observation signals (custom per-profile).
+
+**Key Insight**: Signals describe state changes and observations; they do not trigger state transitions. LLM can also emit signals to describe its observations without modifying response quality.
+
+**Signal Sources**:
+
+**Framework Signals** (from core reducer):
+- `conversation.interrupted`: User interrupted AI speech
+- `conversation.speaking_limit_exceeded`: User exceeded speaking duration limit
+- `llm.generation_start`: LLM began response generation
+- `llm.generation_complete`: LLM finished response generation
+- `llm.generation_error`: LLM generation failed
+- `analytics.turn_metrics_updated`: Complete turn metrics logged
+
+**LLM-Emitted Signals** (custom per profile):
+- Extracted from LLM response as `<signals>{JSON}</signals>` blocks
+- Prefixed with `custom.` namespace (e.g., `custom.exam.question_asked`)
+- Profile-specific, defined in `InstructionProfile.signals` dict
+- Examples: IELTS emits `custom.exam.question_asked`, negotiator emits `custom.negotiation.counteroffer_made`
+- System prompt dynamically injects profile signals so LLM knows what to emit
+
+**Signal Extraction**:
+
+- Regex pattern: `<signals>\s*\{.*?\}\s*</signals>`
+- Happens during streaming, signals buffered silently (not sent to TTS)
+- Clean response (signal-stripped) stored in conversation memory
+
+**Backward Compatibility**: 100% - All signals are optional. Core functions identically with zero listeners registered.
 
 ### 2. AudioManager (`core/audio_manager.py`)
 
@@ -307,20 +347,66 @@ class InstructionProfile(BaseModel):
     human_speaking_limit_sec: Optional[int]  # Max user speech duration
     acknowledgments: List[str]          # Limit exceeded responses
     instructions: str                   # System prompt
+    signals: Dict[str, str]             # Custom signals this profile may emit (NEW)
 ```
 
-**Pre-configured Profiles**:
+**System Prompt Construction**:
 
-- `negotiator`: Human authority, buyer persona
-- `ielts_instructor`: AI authority, speaking test examiner
-- `confused_customer`: Human authority, support scenario
-- `technical_support`: AI authority, troubleshooting agent
-- `language_tutor`: Human authority, conversational practice
-- `curious_friend`: Default authority, casual chat
+- **Base**: `SYSTEM_PROMPT_BASE` with generic signal guidance (not profile-specific)
+- **Dynamic Injection**: `get_system_prompt()` appends profile-specific signals with `custom.` prefix
+- **Profile Instructions**: Added after signal hints
+- Result: LLM receives exact signals to emit for its role
+
+**Pre-configured Profiles** (with custom signals):
+
+- `negotiator`: 3 signals (counteroffer_made, objection_raised, answer_complete)
+- `ielts_instructor`: 4 signals (exam.question_asked, exam.response_received, exam.fluency_observation, answer_complete)
+- `confused_customer`: 3 signals (user_confused, clarification_needed, answer_complete)
+- `technical_support`: 4 signals (issue_identified, solution_offered, escalation_needed, answer_complete)
+- `language_tutor`: 3 signals (vocabulary_introduced, grammar_note, answer_complete)
+- `curious_friend`: 3 signals (shared_interest, follow_up_question, answer_complete)
 
 ## Key Design Patterns
 
-### 1. Immediate vs. Polite Interruption
+### 1. Hybrid Streaming with Signal Detection
+
+**Problem**: Signals appear at END of LLM response, but streaming sends sentences to TTS before signals arrive.
+
+**Solution**: Stream until `<signals` tag detected, then buffer silently:
+
+```python
+for token in llm.stream_completion(...):
+    full_response += token
+    
+    if "<signals" in full_response and not signals_started:
+        signals_started = True
+        # Send any remaining incomplete sentence
+        # Then silently collect signal block
+        continue
+    
+    if not signals_started:
+        # Process as normal (send to TTS on punctuation)
+    # else: buffer silently
+```
+
+**Benefits**:
+- Low latency for main response (streaming + sentence-level)
+- Zero signal contamination (signal blocks never reach TTS)
+- Minimal buffering (only trailing signal block)
+
+### 2. AI-Initiated Turns
+
+**Pattern**: Two methods for turn generation:
+
+- `_process_turn_async()`: User-initiated turn (ASR → LLM → TTS)
+- `_generate_ai_turn()`: AI-initiated turn (LLM → TTS, no ASR). Used for greetings when `start="ai"`
+
+**Benefits**:
+- Profiles starting with `start="ai"` can greet first
+- Cleaner initialization (no dummy audio needed)
+- Reusable for proactive AI statements
+
+### 3. Immediate vs. Polite Interruption
 
 **Immediate (Human Authority)**:
 
@@ -353,6 +439,35 @@ if not interruption_manager.is_turn_processing_allowed(ai_speaking):
 # PLAY_ACK acknowledgment
 if self.human_interrupt_event.is_set():
     return  # Don't play if user interrupted
+```
+
+### 3. Signals for Decoupled Observability
+
+**Pattern**: Core emits named Signals describing state changes; external listeners subscribe optionally without core knowledge of their existence.
+
+**Separation of Concerns**:
+
+- **Actions** (from Reducer): Trigger state changes and side effects (deterministic)
+- **Signals** (from Reducer): Broadcast observations about state changes (optional, no-op if no listeners)
+- **Core Logic**: Reducer is unaware of and unaffected by listeners (pure function)
+
+**Benefits**:
+
+- Plugins/dashboards added without modifying core
+- Analytics decoupled from business logic
+- Multiple listeners can react to same event independently
+- Listener failures isolated (exception caught, logged, core unaffected)
+
+**Example Signal Flow**:
+
+```
+VAD_SPEECH_START event
+→ Reducer: state.conversation.state = SPEAKING
+→ emit_signal("conversation.interrupted", {...}) [if applicable]
+→ Listener 1: Log to analytics DB
+→ Listener 2: Send metrics to monitoring dashboard
+→ Listener 3: Calculate turn features for ML
+[All listeners run independently, exceptions don't crash core]
 ```
 
 ### 3. Human Speaking Limit

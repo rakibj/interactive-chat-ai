@@ -82,6 +82,7 @@ class InstructionProfile(BaseModel):
     human_speaking_limit_sec: Optional[int] = None
     acknowledgments: List[str] = []
     instructions: str
+    signals: dict[str, str] = {}  # Signal name -> description mapping for profile
 
     class Config:
         frozen = True  # Make instances immutable
@@ -111,6 +112,110 @@ You are in a live spoken conversation.
 - Keep responses concise (1-2 sentences typically).
 - No disclaimers or meta-commentary.
 - No emojis or excessive filler.
+
+OPTIONAL STRUCTURED SIGNALS (FOR THE SYSTEM):
+
+- You may optionally include structured signals at the VERY END of your response.
+- Signals describe observations about the conversation or user intent.
+- Signals do NOT perform actions.
+- If you are unsure, omit the signals entirely.
+- The spoken response must ALWAYS come first.
+
+IMPORTANT: Prefix profile-specific signals with "custom." (e.g., "custom.user_action").
+
+FORMAT:
+
+Wrap signals in <signals></signals> tags.
+The content inside must be valid JSON.
+
+Each signal:
+- Uses a string key (namespaced, e.g. "intake.user_data_collected" or "custom.user_action").
+- Has a JSON object as its value.
+- May include parameters such as confidence, fields, or notes.
+
+Do NOT include any text outside JSON inside <signals>.
+
+EXAMPLES:
+
+Example 1 — Generic custom signal:
+
+That's an interesting observation.
+
+<signals>
+{
+  "custom.user_observation": {
+    "confidence": 0.88,
+    "category": "relevant"
+  }
+}
+</signals>
+
+---
+
+Example 2 — User data collected:
+
+Thanks, I've got everything I need.
+
+<signals>
+{
+  "intake.user_data_collected": {
+    "confidence": 0.92,
+    "fields": ["name", "email"]
+  }
+}
+</signals>
+
+---
+
+Example 3 — User appears confused:
+
+I'm not entirely sure what you're asking.
+
+<signals>
+{
+  "conversation.user_confused": {
+    "confidence": 0.81
+  }
+}
+</signals>
+
+---
+
+Example 4 — Answer complete:
+
+That covers the main points I wanted to discuss.
+
+<signals>
+{
+  "conversation.answer_complete": {
+    "confidence": 0.84,
+    "needs_followup": true
+  }
+}
+</signals>
+
+---
+
+Example 5 — Multiple signals at once:
+
+Yes, I understand your concern completely.
+
+<signals>
+{
+  "custom.user_acknowledged": {
+    "confidence": 0.9
+  },
+  "conversation.answer_complete": {
+    "confidence": 0.77
+  }
+}
+</signals>
+
+---
+
+Example 6 — No signals (perfectly valid):
+
+That sounds interesting. Could you tell me more?
 """
 
 # Custom Instruction Profiles with per-profile settings
@@ -131,6 +236,11 @@ INSTRUCTION_PROFILES = {
             "Okay.",
             "Noted.",
         ],
+        signals={
+            "negotiation.counteroffer_made": "User made a counter-offer with a price or term.",
+            "negotiation.objection_raised": "User raised an objection or concern about the offer.",
+            "conversation.answer_complete": "User has completed their turn and is waiting for a response.",
+        },
         instructions="""ROLE: You are the BUYER in a negotiation.
 
 OBJECTIVE:
@@ -166,6 +276,12 @@ TONE: Confident, slightly skeptical.""",
             "Right.",
             "Got it.",
         ],
+        signals={
+            "exam.question_asked": "Examiner has asked a Part 1 question.",
+            "exam.response_received": "Candidate has responded to the question.",
+            "exam.fluency_observation": "Examiner made an observation about candidate fluency.",
+            "conversation.answer_complete": "Candidate has completed their answer.",
+        },
         instructions="""ROLE: You are an IELTS Speaking Instructor conducting Part 1 of the IELTS Speaking test.
 
 STRUCTURE - PART 1 ONLY:
@@ -188,6 +304,12 @@ BEHAVIOR:
 - Keep questions on Part 1 topics (NOT Part 2 or Part 3)
 - Be extremely concise and clear
 - Do NOT transition to Part 2 or Part 3
+
+SIGNAL EMISSION:
+- Emit "custom.exam.question_asked" when you ask a new question
+- Emit "custom.exam.response_received" when you acknowledge the candidate's response
+- Emit "custom.exam.fluency_observation" with assessments of their fluency, coherence, or pronunciation
+- Emit "custom.conversation.answer_complete" when a complete turn is finished
 
 TONE: Professional, encouraging, supportive.""",
     ),
@@ -212,6 +334,11 @@ TONE: Professional, encouraging, supportive.""",
             "Got it.",
             "Let me check that.",
         ],
+        signals={
+            "conversation.user_confused": "Customer expresses confusion about a policy or process.",
+            "customer_service.clarification_needed": "Customer is asking for clarification on a previous statement.",
+            "conversation.answer_complete": "Customer has completed their question or concern.",
+        },
         instructions="""ROLE: You are a confused customer trying to return an item or get support.
 
 CHARACTERISTICS:
@@ -246,6 +373,12 @@ TONE: Confused, slightly frustrated, but trying to be reasonable.""",
             "I see the issue.",
             "Okay, try that.",
         ],
+        signals={
+            "support.issue_identified": "Support agent has identified the customer's issue.",
+            "support.solution_offered": "Agent has offered a potential solution or troubleshooting step.",
+            "support.escalation_needed": "Agent has determined the issue requires escalation.",
+            "conversation.answer_complete": "Agent has completed their response.",
+        },
         instructions="""ROLE: You are a technical support agent helping troubleshoot a problem.
 
 BEHAVIOR:
@@ -279,6 +412,11 @@ TONE: Patient, knowledgeable, professional.""",
             "Nice usage.",
             "Perfect.",
         ],
+        signals={
+            "language_learning.vocabulary_introduced": "Tutor has introduced or explained a new vocabulary word or phrase.",
+            "language_learning.grammar_note": "Tutor has provided feedback or explanation on grammar usage.",
+            "conversation.answer_complete": "Student has completed their response.",
+        },
         instructions="""ROLE: You are an English language tutor having a conversational lesson.
 
 OBJECTIVES:
@@ -317,6 +455,11 @@ TONE: Friendly, encouraging, educational.""",
             "That makes sense.",
             "Tell me more!",
         ],
+        signals={
+            "conversation.shared_interest": "Friend has identified a shared interest or common experience.",
+            "conversation.follow_up_question": "Friend is following up naturally on something mentioned.",
+            "conversation.answer_complete": "Friend has completed their turn.",
+        },
         instructions="""ROLE: You are a curious friend having a casual conversation.
 
 BEHAVIOR:
@@ -382,7 +525,18 @@ def get_system_prompt(profile_key: str = None) -> str:
         raise ValueError(f"Unknown profile: {profile_key}. Available: {list(INSTRUCTION_PROFILES.keys())}")
     
     profile: InstructionProfile = INSTRUCTION_PROFILES[profile_key]
-    return SYSTEM_PROMPT_BASE + "\n\n" + profile.instructions
+    
+    # Build signal hints if profile defines signals
+    # Prefix profile-specific signals with "custom." for emission
+    signal_hint = ""
+    if profile.signals:
+        signal_hint = "\n\nSIGNALS YOU MAY EMIT:\n"
+        for signal_name, signal_desc in profile.signals.items():
+            # Add "custom." prefix to profile-defined signals
+            prefixed_name = f"custom.{signal_name}"
+            signal_hint += f"- {prefixed_name}: {signal_desc}\n"
+    
+    return SYSTEM_PROMPT_BASE + signal_hint + "\n\n" + profile.instructions
 
 
 # Backwards compatibility

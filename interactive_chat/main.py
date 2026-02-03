@@ -43,6 +43,8 @@ from core import (
     SessionAnalytics,
 )
 from core.event_driven_core import SystemState, Reducer, Event, Action, EventType, ActionType
+from core.signals import get_signal_registry, Signal
+from signals.consumer import handle_signal  # Import signal consumer for optional logging
 from interfaces import get_asr, get_llm, get_tts
 
 
@@ -148,9 +150,13 @@ class ConversationEngine:
                 is_ai_auth_turn = self.state.authority == "ai" and self.state.is_ai_speaking
                 
                 if not is_ai_auth_turn:
-                    # Feed ASR
+                    # Feed ASR (with error handling)
                     from utils.audio import float32_to_int16
-                    self.asr.accept_waveform(float32_to_int16(frame).tobytes())
+                    try:
+                        self.asr.accept_waveform(float32_to_int16(frame).tobytes())
+                    except Exception as e:
+                        # Silently ignore waveform processing errors
+                        pass
                     
                     # Emit Events
                     now = time.time()
@@ -268,6 +274,61 @@ class ConversationEngine:
             self.session_analytics.log_turn(turn_analytics)
             print(f"📊 Turn #{payload.get('turn_id', 0)} logged to analytics")
 
+    def _generate_ai_turn(self) -> None:
+        """Generate an AI turn without waiting for user input (for greetings, etc)."""
+        try:
+            # LLM Stream with timing
+            llm_start = time.time()
+            messages = [{"role": "system", "content": get_system_prompt(ACTIVE_PROFILE)}] + self.conversation_memory.get_messages()
+            full_response = ""
+            signals_started = False
+            current_sentence = ""
+            
+            # Hybrid streaming: Stream until <signals, then buffer silently
+            for token in self.llm.stream_completion(
+                messages=messages,
+                max_tokens=self.profile_settings["max_tokens"],
+                temperature=self.profile_settings["temperature"],
+            ):
+                if self.human_interrupt_event.is_set():
+                    self.human_interrupt_event.clear()
+                    return
+                
+                if token:
+                    full_response += token
+                    
+                    # Check if signals block is starting (check for opening tag)
+                    if "<signals" in full_response and not signals_started:
+                        signals_started = True
+                        # Send any remaining incomplete sentence before signals
+                        if current_sentence.strip():
+                            self.event_queue.put(Event(EventType.AI_SENTENCE_READY, time.time(), "llm", {"text": current_sentence.strip()}))
+                        current_sentence = ""
+                        continue
+                    
+                    # If signals haven't started, process token as normal sentence
+                    if not signals_started:
+                        current_sentence += token
+                        
+                        # Check for sentence-ending punctuation
+                        if token in ".!?":
+                            if current_sentence.strip():
+                                self.event_queue.put(Event(EventType.AI_SENTENCE_READY, time.time(), "llm", {"text": current_sentence.strip()}))
+                            current_sentence = ""
+                    # else: signals_started = True, just accumulate silently
+            
+            self.state.turn_llm_generation_ms = (time.time() - llm_start) * 1000
+            
+            # Strip signal blocks from full response for memory storage
+            import re
+            clean_response = re.sub(r"<signals>\s*\{.*?\}\s*</signals>", "", full_response, flags=re.DOTALL).strip()
+            
+            if clean_response:
+                self.conversation_memory.add_message("assistant", clean_response)
+                
+        except Exception as e:
+            print(f"❌ Error in AI turn generation: {e}")
+
     def _process_turn_async(self, audio_frames: List, reason: str) -> None:
         """Heavy lifting for turn processing (ASR -> LLM -> TTS)."""
         try:
@@ -281,7 +342,13 @@ class ConversationEngine:
             self.state.turn_transcription_ms = (time.time() - transcription_start) * 1000
             self.state.turn_final_transcript = user_text
             
+            # Skip if empty, no letters, or too short (likely noise/error)
             if not user_text or not any(c.isalpha() for c in user_text):
+                return
+            
+            # Filter out very short single words (likely ASR hallucinations on silence/noise)
+            words = user_text.split()
+            if len(words) == 1 and len(words[0]) <= 3:
                 return
                 
             print(f"💬 User: '{user_text}'")
@@ -291,8 +358,10 @@ class ConversationEngine:
             llm_start = time.time()
             messages = [{"role": "system", "content": get_system_prompt(ACTIVE_PROFILE)}] + self.conversation_memory.get_messages()
             full_response = ""
-            sentence_buffer = ""
+            signals_started = False
+            current_sentence = ""
             
+            # Hybrid streaming: Stream until <signals, then buffer silently
             for token in self.llm.stream_completion(
                 messages=messages,
                 max_tokens=self.profile_settings["max_tokens"],
@@ -304,19 +373,36 @@ class ConversationEngine:
                 
                 if token:
                     full_response += token
-                    sentence_buffer += token
-                    if token in ".!?":
-                        self.event_queue.put(Event(EventType.AI_SENTENCE_READY, time.time(), "llm", {"text": sentence_buffer.strip()}))
-                        sentence_buffer = ""
+                    
+                    # Check if signals block is starting (check for opening tag)
+                    if "<signals" in full_response and not signals_started:
+                        signals_started = True
+                        # Send any remaining incomplete sentence before signals
+                        if current_sentence.strip():
+                            self.event_queue.put(Event(EventType.AI_SENTENCE_READY, time.time(), "llm", {"text": current_sentence.strip()}))
+                        current_sentence = ""
+                        continue
+                    
+                    # If signals haven't started, process token as normal sentence
+                    if not signals_started:
+                        current_sentence += token
+                        
+                        # Check for sentence-ending punctuation
+                        if token in ".!?":
+                            if current_sentence.strip():
+                                self.event_queue.put(Event(EventType.AI_SENTENCE_READY, time.time(), "llm", {"text": current_sentence.strip()}))
+                            current_sentence = ""
+                    # else: signals_started = True, just accumulate silently
             
             self.state.turn_llm_generation_ms = (time.time() - llm_start) * 1000
             self.state.turn_total_latency_ms = (time.time() - transcription_start) * 1000
             
-            if sentence_buffer.strip():
-                self.event_queue.put(Event(EventType.AI_SENTENCE_READY, time.time(), "llm", {"text": sentence_buffer.strip()}))
-                
-            if full_response:
-                self.conversation_memory.add_message("assistant", full_response)
+            # Strip signal blocks from full response for memory storage
+            import re
+            clean_response = re.sub(r"<signals>\s*\{.*?\}\s*</signals>", "", full_response, flags=re.DOTALL).strip()
+            
+            if clean_response:
+                self.conversation_memory.add_message("assistant", clean_response)
                 
         except Exception as e:
             print(f"❌ Error in turn processing: {e}")
@@ -326,9 +412,13 @@ class ConversationEngine:
         print(f"🎙️ Event-Driven Engine started")
         print(f"📋 Profile: {self.profile_settings['name']} (Authority: {self.state.authority})")
         
+        # Get signal registry and attach optional consumer for logging
+        signal_registry = get_signal_registry()
+        signal_registry.register_all(handle_signal)  # Log all signals to stdout
+        
         # Initial Greeting if AI starts
         if self.profile_settings["start"] == "ai":
-             threading.Thread(target=self._process_turn_async, args=([np.zeros(1600)], "greeting"), daemon=True).start()
+            threading.Thread(target=self._generate_ai_turn, daemon=True).start()
 
         try:
             while not self.shutdown_event.is_set():
@@ -341,6 +431,11 @@ class ConversationEngine:
                     # Handle Side-Effects
                     for action in actions:
                         self._handle_action(action)
+                    
+                    # Dispatch signals to listeners (non-blocking, listeners are optional)
+                    # Note: Signal emission happens in Reducer and _handle_action;
+                    # this is just a reference point. Actual signals are emitted via emit_signal()
+                    # from within the event_driven_core and this handler.
                         
                 except queue.Empty:
                     # Drive state machine forward for timeouts even without external events

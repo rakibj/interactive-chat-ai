@@ -100,18 +100,20 @@ class TestStateTransitions:
         state = human_state
         state.state_machine = "SPEAKING"
         state.is_human_speaking = True
+        base_time = time.time()
+        state.last_voice_time = base_time
         
         # User stops speaking
         state, _ = Reducer.reduce(
             state,
-            Event(EventType.VAD_SPEECH_STOP, timestamp=time.time())
+            Event(EventType.VAD_SPEECH_STOP, timestamp=base_time)
         )
         state.is_human_speaking = False
         
         # Wait for pause_ms (600ms default) via TICK event
         state, actions = Reducer.reduce(
             state,
-            Event(EventType.TICK, timestamp=state.last_voice_time + 0.7)
+            Event(EventType.TICK, timestamp=base_time + 0.7)
         )
         
         assert state.state_machine == "PAUSING"
@@ -311,27 +313,40 @@ class TestTurnFlows:
     def test_complete_user_turn_to_processing(self, human_state):
         """Full flow: User speaks → transcribed → Turn ends → Processing"""
         state = human_state
+        base_time = time.time()
         
         # Step 1: User starts speaking
-        state, _ = Reducer.reduce(state, Event(EventType.VAD_SPEECH_START))
+        state, _ = Reducer.reduce(state, Event(EventType.VAD_SPEECH_START, timestamp=base_time))
         assert state.state_machine == "SPEAKING"
         
-        # Step 2: Audio frames arrive
-        for i in range(20):
+        # Step 2: Audio frames arrive (within speaking time)
+        for i in range(10):
             state, _ = Reducer.reduce(state, Event(
                 EventType.AUDIO_FRAME,
+                timestamp=base_time + 0.1 + (i * 0.05),
                 payload={"frame": np.zeros(512), "is_speech": True}
             ))
         
-        # Step 3: User stops speaking
-        state, _ = Reducer.reduce(state, Event(EventType.VAD_SPEECH_STOP))
+        # Step 3: User stops speaking (after 0.6 seconds)
+        state, _ = Reducer.reduce(state, Event(EventType.VAD_SPEECH_STOP, timestamp=base_time + 0.6))
+        # Manually set is_human_speaking to False since VAD_SPEECH_STOP was processed
+        state.is_human_speaking = False
         
-        # Step 4: Silence accumulates (TICK events)
-        for i in range(20):
-            state, actions = Reducer.reduce(
-                state,
-                Event(EventType.TICK, timestamp=time.time())
-            )
+        # Step 4: Silence accumulates - need TICK events after pause_ms to transition to PAUSING,
+        # pause_ms = 600ms, end_ms = 1200ms, so we need:
+        # - First TICK at +1.3s (700ms silence) to trigger transition to PAUSING
+        # - Second TICK at +2.0s (1400ms silence) to trigger PROCESS_TURN
+        state, _ = Reducer.reduce(
+            state,
+            Event(EventType.TICK, timestamp=base_time + 1.3)  # 700ms elapsed since voice stopped at 0.6s
+        )
+        assert state.state_machine == "PAUSING"
+        
+        # Continue with TICK to reach end_ms threshold (1200ms)
+        state, actions = Reducer.reduce(
+            state,
+            Event(EventType.TICK, timestamp=base_time + 2.0)  # 1400ms elapsed since voice stopped
+        )
         
         # Should end turn and generate PROCESS_TURN
         assert any(a.type == ActionType.PROCESS_TURN for a in actions)
