@@ -955,7 +955,14 @@ Emit deal_closed or follow_up_scheduled when complete."""
 
 TASK: Ask the user ONE question: "What is your favorite color?"
 
-After they answer, emit the answer_received signal to proceed to the next question."""
+IMPORTANT: After the user answers your question, you MUST emit ONLY this signal:
+<signals>
+{
+  "custom.test.answer_received": {}
+}
+</signals>
+
+Do NOT emit any other signals. Only emit answer_received when the user provides an answer."""
             ),
             
             "question2": InstructionProfile(
@@ -978,7 +985,14 @@ After they answer, emit the answer_received signal to proceed to the next questi
 
 TASK: Ask the user ONE question: "What is your favorite animal?"
 
-After they answer, emit the test.complete signal and thank them for participating."""
+IMPORTANT: After the user answers your question, you MUST emit ONLY this signal:
+<signals>
+{
+  "custom.test.complete": {}
+}
+</signals>
+
+Then thank them for participating. Do NOT emit any other signals."""
             ),
         },
         

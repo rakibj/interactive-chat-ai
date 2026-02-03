@@ -249,6 +249,7 @@ SystemState now tracks per-turn metrics for automatic analytics logging:
 5. `_transition_to_phase()` executes:
    - Loads new InstructionProfile
    - Updates SystemState with new settings (authority, timeouts, etc.)
+   - **Clears conversation memory for fresh start** (each phase begins with clean context)
    - Clears signal history for new phase
    - Injects phase context into system prompt
    - Generates AI greeting if new phase starts with AI
@@ -265,6 +266,12 @@ SYSTEM_PROMPT_BASE
 + ===================
 + Profile instructions (phase-specific role)
 ```
+
+**Phase Isolation**: Each phase operates independently:
+- Conversation memory cleared on transition (prevents cross-phase confusion)
+- All turn metrics reset for new phase
+- Phase signals reset so only current phase's signals matter for transitions
+- Ensures clear separation of concerns between phases
 
 **Backward Compatibility**: 100% - Standalone InstructionProfiles work unchanged. Set `ACTIVE_PHASE_PROFILE = None` to use single profile mode.
 

@@ -355,6 +355,9 @@ class ConversationEngine:
         # Clear phase signals for new phase
         self.phase_emitted_signals.clear()
         
+        # Clear conversation memory for fresh start in new phase
+        self.conversation_memory.clear()
+        
         print(f"✅ Transitioned to phase: {next_profile.name}")
         
         # If new phase starts with AI, generate greeting
