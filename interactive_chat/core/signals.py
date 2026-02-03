@@ -36,6 +36,19 @@ class SignalName(str, Enum):
     CONVERSATION_TURN_COMPLETE = "conversation.turn_complete"
     CONVERSATION_INTERRUPTED = "conversation.interrupted"
     CONVERSATION_SPEAKING_LIMIT_EXCEEDED = "conversation.speaking_limit_exceeded"
+    SPEAKER_CHANGED = "conversation.speaker_changed"
+    
+    # VAD domain (NEW: Critical for demo UI)
+    VAD_SPEECH_STARTED = "vad.speech_started"
+    VAD_SPEECH_ENDED = "vad.speech_ended"
+    
+    # TTS domain (NEW: Critical for demo UI)
+    TTS_SPEAKING_STARTED = "tts.speaking_started"
+    TTS_SPEAKING_ENDED = "tts.speaking_ended"
+    
+    # Turn domain (NEW: Critical for demo UI)
+    TURN_STARTED = "turn.started"
+    TURN_COMPLETED = "turn.completed"
     
     # LLM domain
     LLM_GENERATION_START = "llm.generation_start"
@@ -46,6 +59,12 @@ class SignalName(str, Enum):
     # Analytics domain
     ANALYTICS_TURN_METRICS = "analytics.turn_metrics_updated"
     ANALYTICS_SESSION_SUMMARY = "analytics.session_summary"
+    
+    # Phase domain
+    PHASE_TRANSITION_TRIGGERED = "phase.transition_triggered"
+    PHASE_TRANSITION_STARTED = "phase.transition_started"
+    PHASE_TRANSITION_COMPLETE = "phase.transition_complete"
+    PHASE_PROGRESS_UPDATED = "phase.progress_updated"
     
     # Custom domain (for user extensions)
     CUSTOM_PREFIX = "custom."

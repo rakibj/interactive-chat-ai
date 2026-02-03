@@ -70,6 +70,18 @@ class SystemState:
     current_phase_id: Optional[str] = None  # Current phase in PhaseProfile (None if standalone)
     phase_profile_name: Optional[str] = None  # Active PhaseProfile name (None if standalone)
     
+    # Phase Observation Tracking (NEW)
+    active_phase_id: Optional[str] = None              # Current phase ID
+    phase_index: int = 0                               # 0-based index in phase list
+    total_phases: int = 0                              # Total phases in PhaseProfile
+    phases_completed: List[str] = field(default_factory=list)  # ["greeting", "part1"]
+    phase_progress: Dict[str, Dict] = field(default_factory=dict)  # {"greeting": {"status": "completed", "duration_sec": 45.2}}
+    last_phase_transition_reason: Optional[str] = None # Signal that triggered transition
+    
+    # Speaker Tracking (NEW)
+    current_speaker: str = "silence"  # "human", "ai", "silence"
+    previous_speaker: str = "silence"
+    
     # Logic State
     human_speaking_limit_ack_sent: bool = False
     force_ended: bool = False
@@ -114,17 +126,52 @@ class Reducer:
             if state.turn_start_time is None:
                 state.turn_start_time = event.timestamp
                 
+            # Update speaker status
+            if state.current_speaker != "human":
+                state.previous_speaker = state.current_speaker
+                state.current_speaker = "human"
+                
             if state.state_machine == "IDLE":
                 state.state_machine = "SPEAKING"
                 actions.append(Action(ActionType.LOG, {"message": "🟢 Speech started"}))
+                
+                # Emit signal: human started speaking (critical for demo UI)
+                emit_signal(
+                    SignalName.VAD_SPEECH_STARTED,
+                    payload={
+                        "timestamp": event.timestamp,
+                        "turn_id": state.turn_id,
+                    }
+                )
             elif state.state_machine == "PAUSING":
                 state.state_machine = "SPEAKING"
                 actions.append(Action(ActionType.LOG, {"message": "🟢 Speech resumed"}))
+                
+                # Emit signal: human resumed speaking
+                emit_signal(
+                    SignalName.VAD_SPEECH_STARTED,
+                    payload={
+                        "timestamp": event.timestamp,
+                        "turn_id": state.turn_id,
+                    }
+                )
             
         elif event.type == EventType.VAD_SPEECH_STOP:
             if Reducer._is_mic_muted(state):
                 return state, actions
             state.is_human_speaking = False
+            
+            # Emit signal: human stopped speaking (critical for demo UI)
+            if state.last_voice_time:
+                duration_sec = event.timestamp - state.last_voice_time
+                emit_signal(
+                    SignalName.VAD_SPEECH_ENDED,
+                    payload={
+                        "timestamp": event.timestamp,
+                        "duration_sec": duration_sec,
+                        "turn_id": state.turn_id,
+                    }
+                )
             
         elif event.type == EventType.AUDIO_FRAME:
             # Check if we should listen
@@ -185,6 +232,23 @@ class Reducer:
                 actions.append(Action(ActionType.LOG, {"message": f"🤖 AI Sentence ready: {preview}{suffix}"}))
                 if not state.is_ai_speaking:
                     state.is_ai_speaking = True
+                    
+                    # Update speaker status
+                    if state.current_speaker != "ai":
+                        state.previous_speaker = state.current_speaker
+                        state.current_speaker = "ai"
+                    
+                    # Emit signal: AI started speaking (critical for demo UI)
+                    emit_signal(
+                        SignalName.TTS_SPEAKING_STARTED,
+                        payload={
+                            "timestamp": event.timestamp,
+                            "text_preview": preview,
+                            "turn_id": state.turn_id,
+                            "phase_id": state.active_phase_id,
+                        }
+                    )
+                    
                     actions.append(Action(ActionType.SPEAK_SENTENCE, {"text": text}))
                 else:
                     state.ai_speech_queue.append(text)
@@ -197,6 +261,20 @@ class Reducer:
             else:
                 state.is_ai_speaking = False
                 actions.append(Action(ActionType.LOG, {"message": "🎙️ AI finished speaking"}))
+                
+                # Update speaker status
+                if state.current_speaker == "ai":
+                    state.previous_speaker = state.current_speaker
+                    state.current_speaker = "silence"
+                
+                # Emit signal: AI finished speaking (critical for demo UI)
+                emit_signal(
+                    SignalName.TTS_SPEAKING_ENDED,
+                    payload={
+                        "timestamp": event.timestamp,
+                        "turn_id": state.turn_id,
+                    }
+                )
 
         elif event.type == EventType.RESET_TURN:
             actions.append(Action(ActionType.LOG, {"message": "🔄 Resetting for next turn"}))
@@ -228,6 +306,19 @@ class Reducer:
                         "source": "reducer",
                         "turn_id": state.turn_id,
                     },
+                )
+                
+                # Emit critical signal: turn fully completed (for demo UI)
+                emit_signal(
+                    SignalName.TURN_COMPLETED,
+                    payload={
+                        "timestamp": event.timestamp,
+                        "turn_id": state.turn_id,
+                        "human_transcript": state.turn_final_transcript,
+                        "ai_transcript": state.turn_ai_transcript,
+                        "total_latency_ms": state.turn_total_latency_ms,
+                        "phase_id": state.active_phase_id,
+                    }
                 )
             
             # Reset turn metrics
@@ -284,6 +375,18 @@ class Reducer:
                 state.force_ended = True
                 state.turn_end_reason = "safety_timeout"
                 actions.append(Action(ActionType.LOG, {"message": f"📍 Processing Turn (Reason: safety_timeout)"}))
+                
+                # Emit signal: turn processing started (critical for demo UI)
+                emit_signal(
+                    SignalName.TURN_STARTED,
+                    payload={
+                        "timestamp": event.timestamp,
+                        "turn_id": state.turn_id,
+                        "reason": "safety_timeout",
+                        "phase_id": state.active_phase_id,
+                    }
+                )
+                
                 actions.append(Action(ActionType.PROCESS_TURN, {"reason": "safety_timeout"}))
                 state.state_machine = "IDLE" # Reset machine for next turn
             
@@ -291,6 +394,18 @@ class Reducer:
             elif elapsed_ms >= state.end_ms:
                 state.turn_end_reason = "silence"
                 actions.append(Action(ActionType.LOG, {"message": f"📍 Processing Turn (Reason: silence)"}))
+                
+                # Emit signal: turn processing started (critical for demo UI)
+                emit_signal(
+                    SignalName.TURN_STARTED,
+                    payload={
+                        "timestamp": event.timestamp,
+                        "turn_id": state.turn_id,
+                        "reason": "silence",
+                        "phase_id": state.active_phase_id,
+                    }
+                )
+                
                 actions.append(Action(ActionType.PROCESS_TURN, {"reason": "silence"}))
                 state.state_machine = "IDLE"
 
