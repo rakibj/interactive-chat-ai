@@ -174,7 +174,15 @@ class Reducer:
         elif event.type == EventType.AI_SENTENCE_READY:
             text = event.payload.get("text")
             if text:
-                actions.append(Action(ActionType.LOG, {"message": f"🤖 AI Sentence ready: {text[:30]}..."}))
+                # Truncate at 30 chars but stop at signal tags (indicated by '<')
+                # If '<' appears within 30 chars, truncate before it
+                preview = text[:30]
+                signal_pos = preview.find('<')
+                if signal_pos != -1:
+                    preview = preview[:signal_pos]
+                # Only add "..." if there's more text after our preview
+                suffix = "..." if len(preview) < len(text) else ""
+                actions.append(Action(ActionType.LOG, {"message": f"🤖 AI Sentence ready: {preview}{suffix}"}))
                 if not state.is_ai_speaking:
                     state.is_ai_speaking = True
                     actions.append(Action(ActionType.SPEAK_SENTENCE, {"text": text}))

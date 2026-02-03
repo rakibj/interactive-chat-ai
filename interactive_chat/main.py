@@ -410,6 +410,31 @@ class ConversationEngine:
                 time.sleep(0.5)  # Brief pause before shutdown
                 self._request_shutdown()
     
+    def _is_valid_ai_sentence(self, text: str) -> bool:
+        """Check if sentence is valid (not garbage/empty).
+        
+        Filters out:
+        - Empty or whitespace-only strings
+        - Strings that are just punctuation marks
+        - Strings that are just dots, ellipsis, or repetitive punctuation
+        """
+        if not text or not text.strip():
+            return False
+        
+        # Remove all punctuation and spaces - if nothing left, it's garbage
+        import re
+        alphanumeric_only = re.sub(r'[^a-zA-Z0-9]', '', text)
+        if not alphanumeric_only:
+            return False
+        
+        # Additional checks
+        stripped = text.strip()
+        # Reject if it's just dots or repeated punctuation
+        if all(c in '.,!?;:…-' for c in stripped):
+            return False
+        
+        return True
+
     def _get_current_system_prompt(self) -> str:
         """Get system prompt for current profile/phase."""
         if self.active_phase_profile and self.state.current_phase_id:
@@ -450,7 +475,7 @@ class ConversationEngine:
                         # Strip any partial signal tags from current_sentence before sending
                         import re
                         clean_sentence = re.sub(r'<signals.*$', '', current_sentence, flags=re.DOTALL).strip()
-                        if clean_sentence:
+                        if clean_sentence and self._is_valid_ai_sentence(clean_sentence):
                             self.event_queue.put(Event(EventType.AI_SENTENCE_READY, time.time(), "llm", {"text": clean_sentence}))
                         current_sentence = ""
                         continue
@@ -461,10 +486,14 @@ class ConversationEngine:
                         
                         # Check for sentence-ending punctuation
                         if token in ".!?":
-                            if current_sentence.strip():
+                            if current_sentence.strip() and self._is_valid_ai_sentence(current_sentence.strip()):
                                 self.event_queue.put(Event(EventType.AI_SENTENCE_READY, time.time(), "llm", {"text": current_sentence.strip()}))
                             current_sentence = ""
                     # else: signals_started = True, just accumulate silently
+            
+            # Handle any remaining sentence at end of stream (stream ended without period)
+            if current_sentence.strip() and not signals_started and self._is_valid_ai_sentence(current_sentence.strip()):
+                self.event_queue.put(Event(EventType.AI_SENTENCE_READY, time.time(), "llm", {"text": current_sentence.strip()}))
             
             self.state.turn_llm_generation_ms = (time.time() - llm_start) * 1000
             
@@ -550,7 +579,7 @@ class ConversationEngine:
                         # Strip any partial signal tags from current_sentence before sending
                         import re
                         clean_sentence = re.sub(r'<signals.*$', '', current_sentence, flags=re.DOTALL).strip()
-                        if clean_sentence:
+                        if clean_sentence and self._is_valid_ai_sentence(clean_sentence):
                             self.event_queue.put(Event(EventType.AI_SENTENCE_READY, time.time(), "llm", {"text": clean_sentence}))
                         current_sentence = ""
                         continue
@@ -561,10 +590,14 @@ class ConversationEngine:
                         
                         # Check for sentence-ending punctuation
                         if token in ".!?":
-                            if current_sentence.strip():
+                            if current_sentence.strip() and self._is_valid_ai_sentence(current_sentence.strip()):
                                 self.event_queue.put(Event(EventType.AI_SENTENCE_READY, time.time(), "llm", {"text": current_sentence.strip()}))
                             current_sentence = ""
                     # else: signals_started = True, just accumulate silently
+            
+            # Handle any remaining sentence at end of stream (stream ended without period)
+            if current_sentence.strip() and not signals_started and self._is_valid_ai_sentence(current_sentence.strip()):
+                self.event_queue.put(Event(EventType.AI_SENTENCE_READY, time.time(), "llm", {"text": current_sentence.strip()}))
             
             self.state.turn_llm_generation_ms = (time.time() - llm_start) * 1000
             self.state.turn_total_latency_ms = (time.time() - transcription_start) * 1000

@@ -138,6 +138,12 @@ def test_phase_profile_end_to_end_simple():
     engine.shutdown_event = threading.Event()
     engine.shutdown_requested = False
     engine._generate_ai_turn = lambda *args, **kwargs: None  # Stub: avoid TTS/LLM
+    
+    # Add mock conversation_memory with clear() method
+    class MockMemory:
+        def clear(self):
+            pass
+    engine.conversation_memory = MockMemory()
 
     current_profile = simple.get_phase(simple.initial_phase)
     engine.profile_settings = get_profile_settings(None, current_profile)
