@@ -1,9 +1,12 @@
 """FastAPI server for Interactive Chat AI demo."""
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
 import logging
+import json
+import uuid
+import asyncio
 
 from .api.models import (
     HealthResponse,
@@ -13,7 +16,12 @@ from .api.models import (
     SpeakerStatus,
     Turn,
     ConversationState,
+    APILimitation,
+    WSEventMessage,
+    WSConnectionRequest,
 )
+from .api.session_manager import get_session_manager
+from .api.event_buffer import EventBuffer
 
 logger = logging.getLogger(__name__)
 
@@ -285,6 +293,194 @@ def _build_phase_progress(state) -> list:
 
 
 # ==================== API DOCUMENTATION ====================
+
+
+@app.get(
+    "/api/limitations",
+    response_model=list[APILimitation],
+    summary="Get API limitations and workarounds",
+    tags=["System"],
+)
+async def get_limitations():
+    """
+    Get list of known API limitations and their workarounds.
+    
+    Phase 1 is a single-user demo. Phase 2 (WebSocket) will add multi-user support.
+    """
+    return [
+        APILimitation(
+            limitation="Single user only - engine breaks with 2+ concurrent users",
+            workaround="Reload page to reset state between conversations",
+            planned_fix="Phase 2 adds session isolation via WebSocket streaming",
+            phase="phase_2"
+        ),
+        APILimitation(
+            limitation="No persistent storage - state lost on shutdown",
+            workaround="Session logs saved to /logs before shutdown",
+            planned_fix="Phase 3 adds database persistence layer",
+            phase="phase_3"
+        ),
+        APILimitation(
+            limitation="No authentication - API is public",
+            workaround="Deploy behind reverse proxy with auth (nginx, etc.)",
+            planned_fix="Phase 3 adds JWT authentication",
+            phase="phase_3"
+        ),
+    ]
+
+
+# ==================== WEBSOCKET STREAMING ====================
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    """
+    WebSocket endpoint for real-time event streaming.
+    
+    Connection flow:
+    1. Client connects to /ws
+    2. Client sends optional WSConnectionRequest (session_id, phase_profile)
+    3. Server responds with SessionInfo
+    4. Server sends buffered events (catch-up)
+    5. Server streams live events in real-time
+    6. Client can reconnect with session_id to resume
+    
+    Message format: All messages are WSEventMessage (JSON)
+    
+    Close codes:
+    - 4001: Invalid session_id (resume failed)
+    - 4029: Too many connections from this IP
+    - 4503: Engine not initialized
+    - 1002: Invalid JSON in message
+    """
+    
+    # Check engine availability
+    if _engine is None:
+        await websocket.close(code=4503, reason="Engine not initialized")
+        return
+    
+    # Get session manager
+    session_mgr = get_session_manager()
+    
+    # Get client IP
+    client_ip = websocket.client.host if websocket.client else "unknown"
+    
+    # Accept connection
+    await websocket.accept()
+    
+    session_id = None
+    connection_id = str(uuid.uuid4())
+    
+    try:
+        # Receive connection request or create new session
+        data = await websocket.receive_text()
+        
+        try:
+            req_data = json.loads(data)
+            request = WSConnectionRequest(**req_data)
+            session_id = request.session_id
+        except (json.JSONDecodeError, ValueError):
+            await websocket.close(code=1002, reason="Invalid JSON in message")
+            return
+        
+        # Try to resume or create session
+        if session_id:
+            # Resume existing session
+            session = session_mgr.get_session(session_id)
+            if not session:
+                await websocket.close(code=4001, reason="Invalid session_id")
+                return
+        else:
+            # Check IP rate limit
+            if not session_mgr.check_ip_limit(client_ip):
+                await websocket.close(code=4029, reason="Too many connections from this IP")
+                return
+            
+            # Create new session
+            session = session_mgr.create_session(
+                phase_profile=request.phase_profile if request else None,
+                user_agent=request.user_agent if request else None
+            )
+            session_id = session.session_id
+        
+        # Register connection and IP
+        session_mgr.add_connection(session_id, connection_id)
+        session_mgr.register_ip_connection(client_ip, session_id)
+        
+        # Send session info
+        session_info_msg = {
+            "message_id": f"msg_{uuid.uuid4().hex[:8]}",
+            "event_type": "session_created",
+            "timestamp": datetime.utcnow().timestamp(),
+            "payload": {
+                "session_id": session_id,
+                "created_at": session.created_at,
+                "state": session.state,
+            },
+            "phase_id": None,
+            "turn_id": None,
+        }
+        await websocket.send_json(session_info_msg)
+        
+        # Send buffered events (catch-up)
+        buffer = session_mgr.get_buffer(session_id)
+        if buffer:
+            for event in buffer.get_events():
+                await websocket.send_json({
+                    "message_id": event.message_id,
+                    "event_type": event.event_type,
+                    "timestamp": event.timestamp,
+                    "payload": event.payload,
+                    "phase_id": event.phase_id,
+                    "turn_id": event.turn_id,
+                })
+        
+        # Set session to ACTIVE
+        from .api.models import SessionState
+        session_mgr.set_session_state(session_id, SessionState.ACTIVE)
+        
+        # Listen for messages and stream events
+        # In a real implementation, this would:
+        # - Listen for client heartbeat messages
+        # - Subscribe to engine signals
+        # - Stream events to client in real-time
+        # - Handle reconnects and catch-up
+        
+        while True:
+            # Try to receive heartbeat or command from client (with timeout)
+            try:
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=60.0)
+                # Client sent a message (heartbeat or command)
+                session_mgr.update_activity(session_id)
+                
+                try:
+                    json.loads(data)  # Validate JSON
+                except json.JSONDecodeError:
+                    await websocket.close(code=1002, reason="Invalid JSON in message")
+                    return
+                
+            except asyncio.TimeoutError:
+                # No message for 60 seconds - but keep connection alive
+                # Send heartbeat
+                heartbeat = {
+                    "message_id": f"msg_{uuid.uuid4().hex[:8]}",
+                    "event_type": "heartbeat",
+                    "timestamp": datetime.utcnow().timestamp(),
+                    "payload": {},
+                    "phase_id": None,
+                    "turn_id": None,
+                }
+                await websocket.send_json(heartbeat)
+    
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+    finally:
+        # Clean up
+        if session_id:
+            session_mgr.remove_connection(session_id, connection_id)
+            session_mgr.unregister_ip_connection(client_ip, session_id)
 
 
 @app.get("/docs", include_in_schema=False)

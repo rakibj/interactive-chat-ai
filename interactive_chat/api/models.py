@@ -167,3 +167,99 @@ class ErrorResponse(BaseModel):
                 "timestamp": "2026-02-04T12:34:56.789123"
             }
         }
+
+
+# ============================================================================
+# Phase 2 Models: WebSocket, Session Management, Event Streaming
+# ============================================================================
+
+
+class SessionState:
+    """Session lifecycle states."""
+    INITIALIZING = "initializing"
+    ACTIVE = "active"
+    PAUSED = "paused"
+    COMPLETED = "completed"
+    ERROR = "error"
+
+
+class SessionInfo(BaseModel):
+    """WebSocket session metadata."""
+    
+    session_id: str = Field(..., description="Unique session ID (UUID)")
+    created_at: float = Field(..., description="Creation timestamp (Unix time)")
+    state: str = Field(default=SessionState.INITIALIZING, description="Current session state")
+    phase_profile: Optional[str] = Field(None, description="Phase profile name if applicable")
+    user_agent: Optional[str] = Field(None, description="Client user agent string")
+    last_activity: float = Field(..., description="Last activity timestamp for TTL tracking")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "session_id": "550e8400-e29b-41d4-a716-446655440000",
+                "created_at": 1707052800.123,
+                "state": "active",
+                "phase_profile": "default",
+                "user_agent": "Mozilla/5.0...",
+                "last_activity": 1707052810.456
+            }
+        }
+
+
+class WSEventMessage(BaseModel):
+    """WebSocket event message with deduplication."""
+    
+    message_id: str = Field(..., description="Unique message ID for deduplication")
+    event_type: str = Field(..., description="Event type (signal, phase_change, turn_update, etc.)")
+    timestamp: float = Field(..., description="Event timestamp (Unix time)")
+    payload: Dict[str, Any] = Field(..., description="Event-specific data")
+    phase_id: Optional[str] = Field(None, description="Phase ID if applicable")
+    turn_id: Optional[int] = Field(None, description="Turn ID if applicable")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "message_id": "msg_550e8400_0001",
+                "event_type": "signal",
+                "timestamp": 1707052800.123,
+                "payload": {"event_name": "vad.speech_started", "duration": 0.5},
+                "phase_id": "part1",
+                "turn_id": 5
+            }
+        }
+
+
+class WSConnectionRequest(BaseModel):
+    """WebSocket connection request payload."""
+    
+    session_id: Optional[str] = Field(None, description="Existing session ID to resume (optional)")
+    phase_profile: Optional[str] = Field(None, description="Phase profile to load")
+    user_agent: Optional[str] = Field(None, description="Client user agent")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "session_id": "550e8400-e29b-41d4-a716-446655440000",
+                "phase_profile": "default",
+                "user_agent": "Mozilla/5.0..."
+            }
+        }
+
+
+class APILimitation(BaseModel):
+    """API limitation documentation."""
+    
+    limitation: str = Field(..., description="Description of the limitation")
+    workaround: str = Field(..., description="Current workaround")
+    planned_fix: Optional[str] = Field(None, description="When/how it will be fixed")
+    phase: Optional[str] = Field(None, description="Phase that addresses this (e.g., 'phase_2')")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "limitation": "Single user only - engine breaks with 2+ concurrent users",
+                "workaround": "Reload page to reset state between conversations",
+                "planned_fix": "Phase 2 adds session isolation via WebSocket",
+                "phase": "phase_2"
+            }
+        }

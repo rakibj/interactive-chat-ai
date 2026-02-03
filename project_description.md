@@ -1036,9 +1036,9 @@ acknowledgments=["Okay.", "Noted.", "Got it."]
 
 ## API Architecture & Limitations
 
-### Phase 1: Demo API (Complete) ✅
+### Phase 1: REST API (Complete) ✅
 
-**Endpoints** (Pydantic-validated, OpenAPI documented):
+**REST Endpoints** (Pydantic-validated, OpenAPI documented):
 
 - `GET /api/health` - System health status
 - `GET /api/state/phase` - Current phase state with progress
@@ -1048,7 +1048,7 @@ acknowledgments=["Okay.", "Noted.", "Got it."]
 - `GET /docs` - Swagger UI documentation
 - `GET /redoc` - ReDoc documentation
 
-**Models** (All Pydantic with validation, JSON schema examples):
+**Phase 1 Models** (Pydantic with validation, JSON schema examples):
 
 - `EventPayload` - Signal events for streaming
 - `PhaseState` - Current phase with progress array
@@ -1056,57 +1056,115 @@ acknowledgments=["Okay.", "Noted.", "Got it."]
 - `Turn` - Single conversation turn with latency
 - `ConversationState` - Complete state snapshot
 - `HealthResponse` - API health status
+- `ErrorResponse` - Standardized error format
 
-**Test Coverage**: ✅ 24 tests covering all endpoints, error cases, and model validation
+**Phase 1 Test Coverage**: ✅ 24 tests covering all endpoints, error cases, and model validation
 
-### Single-User Limitation ⚠️
+---
+
+### Phase 2: WebSocket Streaming & Session Management (Complete) ✅
+
+**New WebSocket Endpoint**:
+
+- `WS /ws` - Real-time event streaming with session management
+
+**WebSocket Features**:
+
+- **Session-based connections**: UUID-generated session IDs, 30-minute TTL
+- **Event buffering**: Last 100 events per session for catch-up on reconnect
+- **Deduplication**: By message_id to prevent duplicate delivery
+- **Rate limiting**: 5 connections per IP, 1000 events/minute per session
+- **Session isolation**: Events isolated between sessions, no cross-session leakage
+- **Graceful error handling**: Proper close codes (4001 invalid session, 4029 rate limit, 4503 no engine)
+
+**Phase 2 Endpoints**:
+
+- `WS /ws` - WebSocket real-time streaming
+- `GET /api/limitations` - Lists all known constraints with workarounds and fixes
+
+**Phase 2 Models** (Pydantic with validation):
+
+- `SessionState` - Enum (INITIALIZING, ACTIVE, PAUSED, COMPLETED, ERROR)
+- `SessionInfo` - Session metadata with UUID and TTL tracking
+- `WSEventMessage` - WebSocket messages with message_id for deduplication
+- `WSConnectionRequest` - Client connection payload (optional session_id for resume)
+- `APILimitation` - Limitation documentation with workarounds and phase fixes
+
+**Phase 2 Components**:
+
+- `EventBuffer` - Ring buffer storing 100 events per session for catch-up
+- `SessionManager` - Session lifecycle, connection tracking, IP rate limiting
+- `WebSocket Endpoint` - Full duplex real-time streaming with heartbeats
+
+**Phase 2 Test Coverage**: ✅ 52 new tests (26 contract + 26 integration)
+- Contract tests: WebSocket protocol, event streaming, session management
+- Integration tests: Endpoint behavior, session lifecycle, rate limiting, API contracts
+
+**Total Test Count**: ✅ 162 tests (110 Phase 1 + 52 Phase 2), all passing
+
+### Single-User Limitation (Phase 1) ⚠️
 
 **Current Engine Design**:
 
 - **NOT thread-safe for concurrent users** - Engine shares global state via `_engine` module variable
 - **Single conversation at a time** - SystemState is monolithic (cannot isolate user sessions)
-- **No session management** - No user IDs, session tokens, or request queuing
+- **No per-session isolation** - Engine state shared across all connected clients
 - **Shared resource access** - All API requests read/write same state object
 
 **Will Break With 2+ Users**:
 
 1. User A: Calls `/api/state` → Reads turn_id=5
-2. User B: Calls `/api/state` → Reads same turn_id=5
+2. User B: Connects to WebSocket → Same turn_id=5
 3. User A: Posts audio → Advances turn_id to 6
 4. User B: Posts audio → Also tries turn_id=6
 5. **Result**: Corrupted turn IDs, mixed transcripts, state conflicts
 
+**Phase 2 Workaround** (Current):
+
+- WebSocket sessions isolate **event buffers and metadata** per user
+- Events don't leak between sessions
+- But underlying **ConversationEngine remains single-user**
+- **Reload page between users** to reset engine state
+
+**Documented in API**: `GET /api/limitations` lists this constraint with workaround
+
 **Migration Path for Multi-User**:
 
-1. **Phase 2 (Future)**: Add session middleware
-   - POST `/api/sessions` → Returns session_id
-   - All endpoints accept `X-Session-ID` header
-   - Session middleware isolates state reads
+1. **Phase 3 (Future)**: Per-session engine isolation
+   - Each session gets its own ConversationEngine instance
+   - True multi-user support without race conditions
+   - Estimated effort: 15-20 hours
 
-2. **Phase 3 (Future)**: Async event queue
-   - Multiple ConversationEngine instances (one per session)
-   - Redis/RabbitMQ for request queuing
-   - Pub/sub for signal distribution
+2. **Phase 4 (Future)**: Database persistence
+   - PostgreSQL for session state
+   - JSONL for event history
+   - Session recovery across restarts
 
-3. **Phase 4 (Future)**: Full multi-tenancy
-   - Database-backed session persistence
-   - Per-user configuration overrides
-   - Session timeout and cleanup
+3. **Phase 5 (Future)**: Full multi-tenancy
+   - User accounts with session ownership
+   - Row-level security in database
+   - API authentication (JWT tokens)
 
 **Current Use Cases**:
 
-✅ Single user + Gradio/Next.js UI on same machine  
-✅ Demo and testing  
-❌ Production multi-user service (requires Phase 2+)  
-❌ API serving multiple clients simultaneously  
-❌ Mobile app connecting to remote engine
+✅ Single user + Gradio/Next.js UI on same machine (Phase 2 WebSocket supports this)
+✅ Demo and testing with reload page workaround
+❌ Production multi-user service (requires Phase 3+ per-session engines)
+❌ API serving multiple concurrent users without reset
+❌ Mobile app connecting to remote engine (multiple devices)
 
-### API Rate Limiting
+### API Rate Limiting (Phase 2)
 
-**No rate limiting currently**. Rapid polling could degrade performance:
+**WebSocket Rate Limiting**:
 
-- `/api/state` - OK for 1-2 requests/sec (lightweight)
-- `/api/events/stream` - Open TCP connection (monitor via nginx/haproxy)
+- **5 connections per IP address** - Prevents local abuse
+- **1000 events per minute per session** - Prevents event floods
+- **Automatic IP-based limiting** - Enforced in SessionManager
+
+**REST API Rate Limiting**:
+
+- No rate limiting currently
+- Rapid polling of `/api/state` OK for 1-2 requests/sec (lightweight)
 
 ### CORS Configuration
 
@@ -1117,19 +1175,90 @@ acknowledgments=["Okay.", "Noted.", "Got it."]
 ```python
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://yourdomain.com"],  # Restrict
+    allow_origins=["https://yourdomain.com"],  # Restrict to your domain
     allow_credentials=True,
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 ```
 
+### Quick API Start
+
+**Start Server**:
+```bash
+python -m interactive_chat.main --no-gradio
+# Server runs at http://localhost:8000
+```
+
+**REST Endpoints**:
+```bash
+curl http://localhost:8000/api/health
+curl http://localhost:8000/api/state
+curl http://localhost:8000/api/limitations
+```
+
+**WebSocket Connection**:
+```python
+import websocket
+ws = websocket.create_connection("ws://localhost:8000/ws")
+ws.send('{"phase_profile": "default"}')
+event = ws.recv()
+print(event)
+```
+
+**API Documentation**:
+- Swagger UI: http://localhost:8000/docs
+- ReDoc: http://localhost:8000/redoc
+- Limitations: GET /api/limitations
+
 ## Future Enhancements
 
-- Multi-user session management with Redis/RabbitMQ
-- WebRTC for remote conversations
+### Phase 3: Per-Session Engine Isolation
+
+- Each session gets its own ConversationEngine instance
+- True multi-user support without race conditions
+- Database-backed session persistence
+- Estimated effort: 15-20 hours
+
+### Phase 4: Database Persistence
+
+- PostgreSQL for session state and history
+- JSONL for detailed event logs
+- Session recovery across restarts
+- User accounts with session ownership
+
+### Phase 5: Advanced Features
+
 - Voice cloning for custom personas
-- Adaptive timeout tuning based on speaking rate
 - Emotion detection for dynamic responses
 - Multi-language support
 - Horizontal scaling with load balancing
+- Full multi-tenancy with row-level security
+
+---
+
+## Documentation
+
+### User Guides
+
+- **[README.md](README.md)** - Quick start guide
+- **[QUICK_START.md](docs/QUICK_START.md)** - 5-minute setup
+- **[API_PHASE_1.md](docs/API_PHASE_1.md)** - Phase 1 REST API guide
+- **[PHASE_2.md](docs/PHASE_2.md)** - Phase 2 WebSocket architecture
+- **[PHASED_AI_GUIDE.md](docs/PHASED_AI_GUIDE.md)** - Multi-phase conversations
+- **[PROFILE_SETTINGS.md](docs/PROFILE_SETTINGS.md)** - Profile configuration
+
+### Technical References
+
+- **[SIGNALS_REFERENCE.md](docs/SIGNALS_REFERENCE.md)** - Complete signal catalog
+- **[IMPLEMENTATION_SUMMARY.md](interactive_chat/IMPLEMENTATION_SUMMARY.md)** - Architecture overview
+- **[TESTING_GUIDE.md](docs/TESTING_GUIDE.md)** - Test infrastructure
+
+### Completion Summaries
+
+- **[PHASE_1_COMPLETION.md](docs/PHASE_1_COMPLETION.md)** - Phase 1 deliverables
+- **[PHASE_2_COMPLETION.md](docs/PHASE_2_COMPLETION.md)** - Phase 2 deliverables
+- **[PHASE_2_CHECKLIST.md](docs/PHASE_2_CHECKLIST.md)** - Phase 2 task breakdown
+- **[FEATURE_COMPLETE.md](docs/FEATURE_COMPLETE.md)** - All features list
+
+---
