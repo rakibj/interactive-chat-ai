@@ -17,7 +17,7 @@ except ImportError:
 import os
 import json
 import re
-from config import (
+from ..config import (
     LLM_BACKEND,
     GGUF_MODEL_PATH,
     OPENAI_API_KEY,
@@ -30,7 +30,7 @@ from config import (
     GROQ_MODEL,
     DEEPSEEK_MODEL,
 )
-from core.signals import emit_signal, SignalName
+from ..core.signals import emit_signal, SignalName
 
 os.environ["LLAMA_CPP_LOG_LEVEL"] = "ERROR"
 

@@ -2,6 +2,16 @@
 import os
 import sys
 import random
+import argparse
+
+# Fix Windows Unicode console encoding issues
+if sys.platform == "win32":
+    try:
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+    except:
+        pass
 
 # Load environment variables FIRST, before any other imports
 from dotenv import load_dotenv
@@ -30,7 +40,7 @@ torch.set_grad_enabled(False)
 # Add project to path
 sys.path.insert(0, str(os.path.dirname(__file__)))
 
-from config import (
+from .config import (
     CONFIDENCE_THRESHOLD,
     ACTIVE_PROFILE,
     ACTIVE_PHASE_PROFILE,
@@ -40,15 +50,28 @@ from config import (
     get_profile_settings,
     PROJECT_ROOT,
 )
-from core import (
+from .core import (
     AudioManager,
     ConversationMemory,
     SessionAnalytics,
 )
-from core.event_driven_core import SystemState, Reducer, Event, Action, EventType, ActionType
-from core.signals import get_signal_registry, Signal
-from signals.consumer import handle_signal  # Import signal consumer for optional logging
-from interfaces import get_asr, get_llm, get_tts
+from .core.event_driven_core import SystemState, Reducer, Event, Action, EventType, ActionType
+from .core.signals import get_signal_registry, Signal
+from .signals.consumer import handle_signal  # Import signal consumer for optional logging
+from .interfaces import get_asr, get_llm, get_tts
+
+# Global engine instance for API server access
+_global_engine = None
+
+def set_global_engine(engine):
+    """Set the global engine instance for API access."""
+    global _global_engine
+    _global_engine = engine
+
+def get_global_engine():
+    """Get the global engine instance."""
+    global _global_engine
+    return _global_engine
 
 
 @dataclass
@@ -121,9 +144,23 @@ class ConversationEngine:
         # Event Queue
         self.event_queue = queue.Queue()
         
-        self.asr = get_asr()
-        self.llm = get_llm()
-        self.tts = get_tts()
+        try:
+            self.asr = get_asr()
+        except Exception as e:
+            print(f"⚠️ ASR not available: {e}")
+            self.asr = None
+        
+        try:
+            self.llm = get_llm()
+        except Exception as e:
+            print(f"⚠️ LLM not available: {e}")
+            self.llm = None
+        
+        try:
+            self.tts = get_tts()
+        except Exception as e:
+            print(f"⚠️ TTS not available: {e}")
+            self.tts = None
         
         # State
         self.response_queue = queue.Queue()
@@ -196,11 +233,17 @@ class ConversationEngine:
         """Periodically update partial text from ASR."""
         def asr_loop():
             while not self.shutdown_event.is_set():
+                if self.asr is None:
+                    time.sleep(0.1)
+                    continue
                 partial = self.asr.get_partial()
                 if partial:
                     self.event_queue.put(Event(EventType.ASR_PARTIAL_TRANSCRIPT, time.time(), "asr", {"text": partial}))
                 time.sleep(0.1)
-        threading.Thread(target=asr_loop, daemon=True).start()
+        
+        # Only start ASR loop if ASR is available
+        if self.asr is not None:
+            threading.Thread(target=asr_loop, daemon=True).start()
 
     def _tts_worker(self) -> None:
         """Process TTS sentences from REDUCER ACTIONS."""
@@ -209,11 +252,13 @@ class ConversationEngine:
             try:
                 text = self.speech_to_speak_queue.get(timeout=0.1)
                 
-                # Interrupt event only for human authority (polite mode otherwise)
-                current_authority = self.state.authority
-                event_to_pass = self.human_interrupt_event if current_authority == "human" else None
-                
-                self.tts.speak(text, interrupt_event=event_to_pass)
+                # Only speak if TTS is available
+                if self.tts is not None:
+                    # Interrupt event only for human authority (polite mode otherwise)
+                    current_authority = self.state.authority
+                    event_to_pass = self.human_interrupt_event if current_authority == "human" else None
+                    
+                    self.tts.speak(text, interrupt_event=event_to_pass)
                 
                 # IMPORTANT: Notify reducer that speech finished
                 self.event_queue.put(Event(EventType.AI_SPEECH_FINISHED, time.time(), "tts"))
@@ -659,6 +704,42 @@ class ConversationEngine:
             print("✅ Goodbye!")
 
 if __name__ == "__main__":
-    import random
+    parser = argparse.ArgumentParser(description="Interactive Chat AI Engine")
+    parser.add_argument('--no-api', action='store_true', help='Skip API server (run engine only)')
+    parser.add_argument('--no-gradio', action='store_true', help='Skip Gradio (for backwards compatibility)')
+    args = parser.parse_args()
+    
+    # Create engine instance FIRST (before API server)
     engine = ConversationEngine()
+    
+    # Set global engine for API access
+    set_global_engine(engine)
+    
+    # Start API server in background thread (unless --no-api flag)
+    if not args.no_api:
+        try:
+            import uvicorn
+            from interactive_chat import server as api_server
+            
+            # Register engine with API server BEFORE starting uvicorn
+            api_server.set_engine(engine)
+            
+            def run_api():
+                uvicorn.run(
+                    api_server.app,
+                    host="0.0.0.0",
+                    port=8000,
+                    log_level="warning",  # Reduce log verbosity
+                    access_log=False
+                )
+            
+            api_thread = threading.Thread(target=run_api, daemon=True)
+            api_thread.start()
+            print("✅ API server started in background (http://localhost:8000)")
+            time.sleep(3)  # Wait for API to fully start
+        except Exception as e:
+            print(f"⚠️  Could not start API server: {e}")
+            print("   Run with --no-api to skip API server")
+    
+    # Run the engine (this blocks until shutdown)
     engine.run()

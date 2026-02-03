@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 import subprocess
 import numpy as np
 import sounddevice as sd
-from config import TTS_MODE, POCKET_VOICE
+from ..config import TTS_MODE, POCKET_VOICE
 
 try:
     from pocket_tts import TTSModel

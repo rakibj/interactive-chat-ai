@@ -97,15 +97,21 @@ async def get_phase_state():
     if not state.active_phase_id:
         raise HTTPException(status_code=400, detail="No active phase")
     
-    progress = _build_phase_progress(state)
+    progress = _build_phase_progress(state, _engine)
+    
+    # Get phase name from engine's active_phase_profile
+    phase_name = "Unknown Phase"
+    if _engine.active_phase_profile and state.active_phase_id:
+        try:
+            phase_name = _engine.active_phase_profile.phases[state.active_phase_id].name
+        except (KeyError, AttributeError, TypeError):
+            phase_name = "Unknown Phase"
     
     return PhaseState(
         current_phase_id=state.active_phase_id,
         phase_index=state.phase_index,
         total_phases=state.total_phases,
-        phase_name=state.current_phase_profile.phases[state.active_phase_id].name
-        if state.current_phase_profile and state.active_phase_id in state.current_phase_profile.phases
-        else "Unknown Phase",
+        phase_name=phase_name,
         phase_profile=state.phase_profile_name or "single_profile",
         progress=progress,
     )
@@ -162,8 +168,9 @@ async def get_conversation_history(limit: int = 50):
     state = _engine.state
     turns = []
     
-    # Get last N turns
-    for i, turn_data in enumerate(state.conversation_history[-limit:]):
+    # Get last N turns from conversation_history (if available)
+    conversation_history = getattr(state, 'conversation_history', [])
+    for i, turn_data in enumerate(conversation_history[-limit:]):
         turn = Turn(
             turn_id=i,
             speaker=turn_data.get("speaker", "unknown"),
@@ -202,28 +209,40 @@ async def get_full_state():
     state = _engine.state
     
     # Build phase state
-    progress = _build_phase_progress(state)
+    progress = _build_phase_progress(state, _engine)
+    
+    # Get phase name from engine's active_phase_profile if available
+    phase_name = "Unknown"
+    if _engine.active_phase_profile and state.active_phase_id:
+        try:
+            phase_name = _engine.active_phase_profile.phases[state.active_phase_id].name
+        except (KeyError, AttributeError, TypeError):
+            phase_name = "Unknown"
+    
     phase_state = PhaseState(
         current_phase_id=state.active_phase_id or "unknown",
         phase_index=state.phase_index,
         total_phases=state.total_phases,
-        phase_name=state.current_phase_profile.phases[state.active_phase_id].name
-        if state.current_phase_profile and state.active_phase_id in state.current_phase_profile.phases
-        else "Unknown",
+        phase_name=phase_name,
         phase_profile=state.phase_profile_name or "single_profile",
         progress=progress,
     )
     
-    # Build speaker status
+    # Build speaker status (use state.current_speaker if available, otherwise "silence")
+    current_speaker = getattr(state, 'current_speaker', 'silence') or 'silence'
     speaker_status = SpeakerStatus(
-        speaker=state.current_speaker or "silence",
+        speaker=current_speaker,
         timestamp=datetime.now().timestamp(),
         phase_id=state.active_phase_id,
     )
     
-    # Build history
+    # Build history from available data
     history = []
-    for i, turn_data in enumerate(state.conversation_history[-20:]):
+    # conversation_history doesn't exist in SystemState, so we start with empty list
+    # In the future, we can populate this from analytics or a separate history store
+    conversation_history = getattr(state, 'conversation_history', [])
+    
+    for i, turn_data in enumerate(conversation_history[-20:]):
         turn = Turn(
             turn_id=i,
             speaker=turn_data.get("speaker", "unknown"),
@@ -253,43 +272,55 @@ async def get_full_state():
 # ==================== HELPER FUNCTIONS ====================
 
 
-def _build_phase_progress(state) -> list:
+def _build_phase_progress(state, engine=None) -> list:
     """Build phase progress array from state.
     
     Args:
         state: SystemState instance
+        engine: ConversationEngine instance (for access to active_phase_profile)
     
     Returns:
         List of PhaseProgress objects
     """
-    if not state.current_phase_profile:
-        return []
-    
-    progress = []
-    for phase_id, phase_prof in state.current_phase_profile.phases.items():
-        # Determine status
-        if phase_id in (state.phases_completed or []):
-            status = "completed"
-        elif phase_id == state.active_phase_id:
-            status = "active"
-        else:
-            status = "upcoming"
+    # Handle missing engine or phase profile gracefully
+    try:
+        if not engine or not hasattr(engine, 'active_phase_profile') or not engine.active_phase_profile:
+            return []
         
-        # Get duration if available
-        duration_sec = None
-        if state.phase_progress and phase_id in state.phase_progress:
-            duration_sec = state.phase_progress[phase_id].get("duration_sec")
+        profile = engine.active_phase_profile
         
-        progress.append(
-            PhaseProgress(
-                id=phase_id,
-                name=phase_prof.name,
-                status=status,
-                duration_sec=duration_sec,
+        # Safety check: ensure phases attribute exists and is iterable
+        if not hasattr(profile, 'phases'):
+            return []
+        
+        progress = []
+        for phase_id, phase_prof in profile.phases.items():
+            # Determine status
+            if phase_id in (state.phases_completed or []):
+                status = "completed"
+            elif phase_id == state.active_phase_id:
+                status = "active"
+            else:
+                status = "upcoming"
+            
+            # Get duration if available
+            duration_sec = None
+            if state.phase_progress and phase_id in state.phase_progress:
+                duration_sec = state.phase_progress[phase_id].get("duration_sec")
+            
+            progress.append(
+                PhaseProgress(
+                    id=phase_id,
+                    name=phase_prof.name,
+                    status=status,
+                    duration_sec=duration_sec,
+                )
             )
-        )
-    
-    return progress
+        
+        return progress
+    except (AttributeError, TypeError, KeyError):
+        # If anything goes wrong, just return empty progress
+        return []
 
 
 # ==================== API DOCUMENTATION ====================

@@ -12,7 +12,7 @@ import io
 import numpy as np
 from collections import deque
 from faster_whisper import WhisperModel
-from config import (
+from ..config import (
     WHISPER_MODEL_PATH,
     VOSK_MODEL_PATH,
     SAMPLE_RATE,
@@ -21,7 +21,7 @@ from config import (
     TURN_END_ASR_MODE,
     WHISPER_CLOUD_MODEL,
 )
-from utils.audio import float32_to_int16
+from ..utils.audio import float32_to_int16
 
 
 class RealtimeASR(ABC):
