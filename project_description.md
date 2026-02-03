@@ -1034,10 +1034,102 @@ acknowledgments=["Okay.", "Noted.", "Got it."]
 3. **Local Whisper**: Slower than cloud (RTF ~0.3x vs 0.1x)
 4. **Windows Only**: PowerShellTTS fallback platform-specific
 
+## API Architecture & Limitations
+
+### Phase 1: Demo API (Complete) ✅
+
+**Endpoints** (Pydantic-validated, OpenAPI documented):
+
+- `GET /api/health` - System health status
+- `GET /api/state/phase` - Current phase state with progress
+- `GET /api/state/speaker` - Real-time speaker status (human/ai/silence)
+- `GET /api/conversation/history?limit=50` - Recent turns
+- `GET /api/state` - Complete state for UI rendering
+- `GET /docs` - Swagger UI documentation
+- `GET /redoc` - ReDoc documentation
+
+**Models** (All Pydantic with validation, JSON schema examples):
+
+- `EventPayload` - Signal events for streaming
+- `PhaseState` - Current phase with progress array
+- `SpeakerStatus` - Active speaker information
+- `Turn` - Single conversation turn with latency
+- `ConversationState` - Complete state snapshot
+- `HealthResponse` - API health status
+
+**Test Coverage**: ✅ 24 tests covering all endpoints, error cases, and model validation
+
+### Single-User Limitation ⚠️
+
+**Current Engine Design**:
+
+- **NOT thread-safe for concurrent users** - Engine shares global state via `_engine` module variable
+- **Single conversation at a time** - SystemState is monolithic (cannot isolate user sessions)
+- **No session management** - No user IDs, session tokens, or request queuing
+- **Shared resource access** - All API requests read/write same state object
+
+**Will Break With 2+ Users**:
+
+1. User A: Calls `/api/state` → Reads turn_id=5
+2. User B: Calls `/api/state` → Reads same turn_id=5
+3. User A: Posts audio → Advances turn_id to 6
+4. User B: Posts audio → Also tries turn_id=6
+5. **Result**: Corrupted turn IDs, mixed transcripts, state conflicts
+
+**Migration Path for Multi-User**:
+
+1. **Phase 2 (Future)**: Add session middleware
+   - POST `/api/sessions` → Returns session_id
+   - All endpoints accept `X-Session-ID` header
+   - Session middleware isolates state reads
+
+2. **Phase 3 (Future)**: Async event queue
+   - Multiple ConversationEngine instances (one per session)
+   - Redis/RabbitMQ for request queuing
+   - Pub/sub for signal distribution
+
+3. **Phase 4 (Future)**: Full multi-tenancy
+   - Database-backed session persistence
+   - Per-user configuration overrides
+   - Session timeout and cleanup
+
+**Current Use Cases**:
+
+✅ Single user + Gradio/Next.js UI on same machine  
+✅ Demo and testing  
+❌ Production multi-user service (requires Phase 2+)  
+❌ API serving multiple clients simultaneously  
+❌ Mobile app connecting to remote engine
+
+### API Rate Limiting
+
+**No rate limiting currently**. Rapid polling could degrade performance:
+
+- `/api/state` - OK for 1-2 requests/sec (lightweight)
+- `/api/events/stream` - Open TCP connection (monitor via nginx/haproxy)
+
+### CORS Configuration
+
+**Current**: Allows all origins (`*`) for local development
+
+**Production**: Update in `server.py`:
+
+```python
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://yourdomain.com"],  # Restrict
+    allow_credentials=True,
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
+```
+
 ## Future Enhancements
 
-- Multi-language support
-- Emotion detection for dynamic responses
+- Multi-user session management with Redis/RabbitMQ
 - WebRTC for remote conversations
 - Voice cloning for custom personas
 - Adaptive timeout tuning based on speaking rate
+- Emotion detection for dynamic responses
+- Multi-language support
+- Horizontal scaling with load balancing
