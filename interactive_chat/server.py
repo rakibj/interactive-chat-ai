@@ -18,10 +18,16 @@ from .api.models import (
     ConversationState,
     APILimitation,
     WSEventMessage,
+    TextInput,
+    EngineCommandRequest,
+    EngineCommandResponse,
+    ConversationReset,
+    ResetResponse,
     WSConnectionRequest,
 )
 from .api.session_manager import get_session_manager
 from .api.event_buffer import EventBuffer
+from .core.event_driven_core import Event
 
 logger = logging.getLogger(__name__)
 
@@ -512,6 +518,141 @@ async def websocket_endpoint(websocket: WebSocket):
         if session_id:
             session_mgr.remove_connection(session_id, connection_id)
             session_mgr.unregister_ip_connection(client_ip, session_id)
+
+
+# ============================================================================
+# PHASE 4: INTERACTIVE CONTROL ENDPOINTS
+# ============================================================================
+
+
+@app.post("/api/conversation/text-input", response_model=dict)
+def handle_text_input(input_data: TextInput):
+    """
+    Process user text input through the engine.
+    Simulates ASR output and injects into conversation.
+    """
+    global _engine
+    
+    if not _engine:
+        raise HTTPException(status_code=503, detail="Engine not initialized")
+    
+    try:
+        # Create ASR_FINAL_TRANSCRIPT event from text
+        event = Event(
+            type="ASR_FINAL_TRANSCRIPT",
+            payload={"text": input_data.text}
+        )
+        
+        # Inject into engine's event queue
+        _engine.event_queue.append(event)
+        
+        # Process one turn
+        _engine.process_turn(
+            override_source="text_input"
+        )
+        
+        # Get updated state
+        state = _engine.get_state()
+        return {
+            "status": "processed",
+            "message": f"Processed text input: {input_data.text[:50]}...",
+            "state": state
+        }
+    except Exception as e:
+        logger.error(f"Text input error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/engine/command", response_model=EngineCommandResponse)
+def handle_engine_command(cmd: EngineCommandRequest):
+    """
+    Control engine state with commands: start, stop, pause, resume.
+    """
+    global _engine
+    
+    if not _engine:
+        raise HTTPException(status_code=503, detail="Engine not initialized")
+    
+    try:
+        command = cmd.command.lower()
+        timestamp = datetime.now().isoformat()
+        
+        if command == "start":
+            _engine.is_paused = False
+            return EngineCommandResponse(
+                status="started",
+                message="Engine started",
+                timestamp=timestamp
+            )
+        elif command == "stop":
+            _engine.is_paused = True
+            _engine.conversation_history.clear()
+            return EngineCommandResponse(
+                status="stopped",
+                message="Engine stopped and memory cleared",
+                timestamp=timestamp
+            )
+        elif command == "pause":
+            _engine.is_paused = True
+            return EngineCommandResponse(
+                status="paused",
+                message="Engine paused",
+                timestamp=timestamp
+            )
+        elif command == "resume":
+            _engine.is_paused = False
+            return EngineCommandResponse(
+                status="resumed",
+                message="Engine resumed",
+                timestamp=timestamp
+            )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown command: {command}. Use: start, stop, pause, resume"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Engine command error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/conversation/reset", response_model=ResetResponse)
+def reset_conversation(reset_req: ConversationReset):
+    """
+    Reset conversation state: clear memory and optionally reset phase.
+    """
+    global _engine
+    
+    if not _engine:
+        raise HTTPException(status_code=503, detail="Engine not initialized")
+    
+    try:
+        timestamp = datetime.now().isoformat()
+        
+        # Clear conversation memory
+        _engine.conversation_history.clear()
+        
+        # Reset phase if requested
+        phase_reset = False
+        if not reset_req.keep_profile:
+            _engine.active_phase_profile = 0
+            phase_reset = True
+        
+        # Reset pause state
+        _engine.is_paused = False
+        
+        return ResetResponse(
+            status="reset",
+            message="Conversation reset successfully",
+            conversation_memory_cleared=True,
+            phase_reset=phase_reset,
+            timestamp=timestamp
+        )
+    except Exception as e:
+        logger.error(f"Reset error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/docs", include_in_schema=False)

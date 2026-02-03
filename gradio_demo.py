@@ -326,6 +326,87 @@ class GradioDemoApp:
         
         return "\n".join(lines)
     
+    # ========================================================================
+    # PHASE 4: CONTROL METHODS
+    # ========================================================================
+    
+    def send_text_input(self, text: str) -> str:
+        """Send text input to engine via /api/conversation/text-input.
+        
+        Args:
+            text: User input text
+            
+        Returns:
+            Status message
+        """
+        if not text or not text.strip():
+            return "❌ Please enter some text"
+        
+        try:
+            response = requests.post(
+                f"{self.api_base}/conversation/text-input",
+                json={"text": text.strip()},
+                timeout=5.0
+            )
+            response.raise_for_status()
+            return "✅ Text sent to engine"
+        except requests.exceptions.ConnectionError:
+            return "❌ Cannot connect to API"
+        except requests.exceptions.Timeout:
+            return "❌ Request timeout"
+        except Exception as e:
+            return f"❌ Error: {str(e)}"
+    
+    def send_engine_command(self, command: str) -> str:
+        """Send control command to engine.
+        
+        Args:
+            command: Command: 'start', 'stop', 'pause', or 'resume'
+            
+        Returns:
+            Status message
+        """
+        try:
+            response = requests.post(
+                f"{self.api_base}/engine/command",
+                json={"command": command},
+                timeout=5.0
+            )
+            response.raise_for_status()
+            data = response.json()
+            return f"✅ {data.get('message', 'Command executed')}"
+        except requests.exceptions.ConnectionError:
+            return "❌ Cannot connect to API"
+        except requests.exceptions.Timeout:
+            return "❌ Request timeout"
+        except Exception as e:
+            return f"❌ Error: {str(e)}"
+    
+    def reset_conversation(self, keep_profile: bool = True) -> str:
+        """Reset conversation.
+        
+        Args:
+            keep_profile: Keep current profile (True) or reset phase (False)
+            
+        Returns:
+            Status message
+        """
+        try:
+            response = requests.post(
+                f"{self.api_base}/conversation/reset",
+                json={"keep_profile": keep_profile},
+                timeout=5.0
+            )
+            response.raise_for_status()
+            data = response.json()
+            return f"✅ {data.get('message', 'Conversation reset')}"
+        except requests.exceptions.ConnectionError:
+            return "❌ Cannot connect to API"
+        except requests.exceptions.Timeout:
+            return "❌ Request timeout"
+        except Exception as e:
+            return f"❌ Error: {str(e)}"
+    
     def build_interface(self) -> gr.Blocks:
         """Build the Gradio interface.
         
@@ -408,6 +489,58 @@ class GradioDemoApp:
                     scale=1
                 )
             
+            # ================================================================
+            # PHASE 4: INTERACTIVE CONTROLS
+            # ================================================================
+            gr.Markdown("## 🎮 Interactive Controls")
+            
+            # Text input for sending messages
+            with gr.Row():
+                text_input = gr.Textbox(
+                    label="Send Text Input (simulates voice transcription)",
+                    placeholder="Type your message here...",
+                    lines=2
+                )
+                send_btn = gr.Button(
+                    "📤 Send",
+                    variant="primary",
+                    scale=0,
+                    min_width=80
+                )
+            
+            # Engine control buttons
+            with gr.Row():
+                start_btn = gr.Button(
+                    "▶️ Start",
+                    variant="primary",
+                    scale=1
+                )
+                pause_btn = gr.Button(
+                    "⏸️ Pause",
+                    scale=1
+                )
+                resume_btn = gr.Button(
+                    "▶️ Resume",
+                    scale=1
+                )
+                stop_btn = gr.Button(
+                    "⏹️ Stop",
+                    variant="stop",
+                    scale=1
+                )
+            
+            # Conversation reset
+            with gr.Row():
+                reset_profile_btn = gr.Button(
+                    "🔄 Reset (Keep Profile)",
+                    scale=2
+                )
+                reset_all_btn = gr.Button(
+                    "🔄 Reset (New Profile)",
+                    variant="stop",
+                    scale=2
+                )
+            
             # Status message
             status_display = gr.Textbox(
                 label="Status",
@@ -449,6 +582,154 @@ class GradioDemoApp:
                     status
                 ]
             
+            # ================================================================
+            # PHASE 4: EVENT HANDLERS FOR CONTROLS
+            # ================================================================
+            
+            def handle_text_submit(text: str):
+                """Handle text input submission."""
+                msg = self.send_text_input(text)
+                # Update displays after sending
+                time.sleep(0.2)  # Brief delay for engine processing
+                displays = update_all_displays()
+                return [msg] + displays + [""]  # Clear text input
+            
+            def handle_start():
+                """Handle start button."""
+                msg = self.send_engine_command("start")
+                time.sleep(0.2)
+                displays = update_all_displays()
+                return [msg] + displays
+            
+            def handle_pause():
+                """Handle pause button."""
+                msg = self.send_engine_command("pause")
+                time.sleep(0.2)
+                displays = update_all_displays()
+                return [msg] + displays
+            
+            def handle_resume():
+                """Handle resume button."""
+                msg = self.send_engine_command("resume")
+                time.sleep(0.2)
+                displays = update_all_displays()
+                return [msg] + displays
+            
+            def handle_stop():
+                """Handle stop button."""
+                msg = self.send_engine_command("stop")
+                time.sleep(0.2)
+                displays = update_all_displays()
+                return [msg] + displays
+            
+            def handle_reset_profile():
+                """Handle reset with profile."""
+                msg = self.reset_conversation(keep_profile=True)
+                time.sleep(0.2)
+                displays = update_all_displays()
+                return [msg] + displays
+            
+            def handle_reset_all():
+                """Handle reset all."""
+                msg = self.reset_conversation(keep_profile=False)
+                time.sleep(0.2)
+                displays = update_all_displays()
+                return [msg] + displays
+            
+            # Wire up control handlers
+            send_btn.click(
+                handle_text_submit,
+                inputs=text_input,
+                outputs=[
+                    status_display,
+                    phase_display,
+                    speaker_display,
+                    captions_display,
+                    session_info,
+                    history_display,
+                    transcript_display,
+                    text_input
+                ]
+            )
+            
+            start_btn.click(
+                handle_start,
+                outputs=[
+                    status_display,
+                    phase_display,
+                    speaker_display,
+                    captions_display,
+                    session_info,
+                    history_display,
+                    transcript_display
+                ]
+            )
+            
+            pause_btn.click(
+                handle_pause,
+                outputs=[
+                    status_display,
+                    phase_display,
+                    speaker_display,
+                    captions_display,
+                    session_info,
+                    history_display,
+                    transcript_display
+                ]
+            )
+            
+            resume_btn.click(
+                handle_resume,
+                outputs=[
+                    status_display,
+                    phase_display,
+                    speaker_display,
+                    captions_display,
+                    session_info,
+                    history_display,
+                    transcript_display
+                ]
+            )
+            
+            stop_btn.click(
+                handle_stop,
+                outputs=[
+                    status_display,
+                    phase_display,
+                    speaker_display,
+                    captions_display,
+                    session_info,
+                    history_display,
+                    transcript_display
+                ]
+            )
+            
+            reset_profile_btn.click(
+                handle_reset_profile,
+                outputs=[
+                    status_display,
+                    phase_display,
+                    speaker_display,
+                    captions_display,
+                    session_info,
+                    history_display,
+                    transcript_display
+                ]
+            )
+            
+            reset_all_btn.click(
+                handle_reset_all,
+                outputs=[
+                    status_display,
+                    phase_display,
+                    speaker_display,
+                    captions_display,
+                    session_info,
+                    history_display,
+                    transcript_display
+                ]
+            )
+            
             # Refresh button
             refresh_btn.click(
                 update_all_displays,
@@ -487,6 +768,7 @@ class GradioDemoApp:
                     status_display
                 ]
             )
+
         
         return demo
 

@@ -79,6 +79,10 @@ class TestAPIEndpoints:
         state.phase_index = 1
         
         engine.state = state
+        
+        # Add active_phase_profile for Phase 4 endpoints
+        engine.active_phase_profile = state.current_phase_profile
+        
         return engine
 
     @pytest.fixture

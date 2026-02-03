@@ -23,7 +23,7 @@ import queue
 import numpy as np
 from collections import deque
 from dataclasses import dataclass
-from typing import List
+from typing import List, Dict, Any
 
 # Bootstrap torch threads
 os.environ["OMP_NUM_THREADS"] = "8"
@@ -557,21 +557,90 @@ class ConversationEngine:
             print(f"❌ Error in AI turn generation: {e}")
     
     def _extract_signals(self, response_text: str) -> List[str]:
-        """Extract signal names from LLM response."""
+        """Extract signal names from LLM response.
+        
+        Handles nested JSON, multiple signal blocks, and malformed inputs gracefully.
+        """
         import re
         import json
         
         signal_names = []
-        signal_matches = re.findall(r"<signals>\s*(\{.*?\})\s*</signals>", response_text, flags=re.DOTALL)
         
-        for match in signal_matches:
-            try:
-                signals_dict = json.loads(match)
+        # Find all <signals>...</signals> blocks
+        signal_blocks = re.findall(
+            r"<signals>\s*(.*?)\s*</signals>",
+            response_text,
+            flags=re.DOTALL
+        )
+        
+        for block in signal_blocks:
+            # Try to extract and parse JSON from the block
+            signals_dict = self._parse_signal_json(block.strip())
+            if signals_dict:
                 signal_names.extend(signals_dict.keys())
-            except json.JSONDecodeError:
-                pass  # Silently ignore malformed signal blocks
         
         return signal_names
+    
+    def _parse_signal_json(self, text: str) -> Dict[str, Any]:
+        """Parse JSON from signal block with robust error handling.
+        
+        Tries multiple parsing strategies to handle:
+        - Nested JSON objects with braces
+        - Malformed JSON
+        - Extra whitespace
+        - Invalid JSON structures
+        """
+        import json
+        
+        if not text or not text.strip():
+            return {}
+        
+        # Strategy 1: Direct JSON parse (works for well-formed JSON)
+        try:
+            result = json.loads(text)
+            if isinstance(result, dict):
+                return result
+        except json.JSONDecodeError:
+            pass
+        
+        # Strategy 2: Find the outermost braces and extract JSON
+        text = text.strip()
+        if text.startswith('{') and text.endswith('}'):
+            try:
+                # Count braces to find matching close brace
+                brace_count = 0
+                for i, char in enumerate(text):
+                    if char == '{':
+                        brace_count += 1
+                    elif char == '}':
+                        brace_count -= 1
+                    
+                    # When brace_count returns to 0, we found the matching close brace
+                    if brace_count == 0 and i > 0:
+                        json_str = text[:i+1]
+                        try:
+                            result = json.loads(json_str)
+                            if isinstance(result, dict):
+                                return result
+                        except json.JSONDecodeError:
+                            pass
+                        break
+            except Exception:
+                pass
+        
+        # Strategy 3: Try to extract JSON-like structure more aggressively
+        # Look for pattern: { ... "key": ... }
+        json_match = re.search(r'(\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\})', text)
+        if json_match:
+            try:
+                result = json.loads(json_match.group(1))
+                if isinstance(result, dict):
+                    return result
+            except json.JSONDecodeError:
+                pass
+        
+        # If all strategies fail, return empty dict
+        return {}
 
     def _process_turn_async(self, audio_frames: List, reason: str) -> None:
         """Heavy lifting for turn processing (ASR -> LLM -> TTS)."""

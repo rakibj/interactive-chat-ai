@@ -62,10 +62,10 @@ def ai_state():
 # ============================================================================
 
 class TestStateTransitions:
-    """Test basic state machine transitions (IDLE → SPEAKING → PAUSING → IDLE)"""
+    """Test basic state machine transitions (IDLE -> SPEAKING -> PAUSING -> IDLE)"""
     
     def test_idle_to_speaking_on_vad_start(self, clean_state):
-        """VAD_SPEECH_START event transitions IDLE → SPEAKING"""
+        """VAD_SPEECH_START event transitions IDLE -> SPEAKING"""
         state = clean_state
         assert state.state_machine == "IDLE"
         
@@ -78,7 +78,7 @@ class TestStateTransitions:
         assert state.is_human_speaking == True
         assert state.turn_start_time is not None
         assert any(a.type == ActionType.LOG for a in actions)
-        print("✅ IDLE → SPEAKING transition works")
+        print("[PASS] IDLE -> SPEAKING transition works")
     
     def test_speaking_resumes_from_pausing(self, clean_state):
         """VAD_SPEECH_START while PAUSING resumes to SPEAKING"""
@@ -93,10 +93,10 @@ class TestStateTransitions:
         
         assert state.state_machine == "SPEAKING"
         assert state.is_human_speaking == True
-        print("✅ PAUSING → SPEAKING resume works")
+        print("[PASS] PAUSING -> SPEAKING resume works")
     
     def test_speaking_to_pausing_on_silence(self, human_state):
-        """Silence triggers SPEAKING → PAUSING transition after pause_ms"""
+        """Silence triggers SPEAKING -> PAUSING transition after pause_ms"""
         state = human_state
         state.state_machine = "SPEAKING"
         state.is_human_speaking = True
@@ -118,10 +118,10 @@ class TestStateTransitions:
         
         assert state.state_machine == "PAUSING"
         assert any("Pause" in a.payload.get("message", "") for a in actions if a.type == ActionType.LOG)
-        print("✅ SPEAKING → PAUSING transition works")
+        print("[PASS] SPEAKING -> PAUSING transition works")
     
     def test_pausing_to_processing_on_extended_silence(self, human_state):
-        """Extended silence triggers PAUSING → IDLE (with PROCESS_TURN action)"""
+        """Extended silence triggers PAUSING -> IDLE (with PROCESS_TURN action)"""
         state = human_state
         state.state_machine = "PAUSING"
         state.is_human_speaking = False
@@ -135,7 +135,7 @@ class TestStateTransitions:
         
         assert state.state_machine == "IDLE"
         assert any(a.type == ActionType.PROCESS_TURN for a in actions)
-        print("✅ PAUSING → IDLE (PROCESS_TURN) works")
+        print("[PASS] PAUSING -> IDLE (PROCESS_TURN) works")
 
 
 class TestAuthorityModes:
@@ -157,7 +157,7 @@ class TestAuthorityModes:
         
         # Audio should be buffered (or at least not rejected)
         assert len(state.turn_audio_buffer) > 0
-        print("✅ Human authority allows audio buffering during AI speech")
+        print("[PASS] Human authority allows audio buffering during AI speech")
     
     def test_ai_authority_mutes_mic_during_speech(self, ai_state):
         """AI authority ignores audio while AI is speaking"""
@@ -176,7 +176,7 @@ class TestAuthorityModes:
         # Audio should NOT be buffered
         assert len(state.turn_audio_buffer) == 0
         assert not any(a.type == ActionType.INTERRUPT_AI for a in actions)
-        print("✅ AI authority mutes mic during AI speech")
+        print("[PASS] AI authority mutes mic during AI speech")
     
     def test_ai_authority_blocks_interruptions(self, ai_state):
         """AI authority never allows interruptions"""
@@ -191,7 +191,7 @@ class TestAuthorityModes:
         )
         
         assert not any(a.type == ActionType.INTERRUPT_AI for a in actions)
-        print("✅ AI authority blocks all interruptions")
+        print("[PASS] AI authority blocks all interruptions")
 
 
 class TestInterruptionLogic:
@@ -211,7 +211,7 @@ class TestInterruptionLogic:
         
         # Strict mode: should interrupt because words detected
         assert any(a.type == ActionType.INTERRUPT_AI for a in actions)
-        print("✅ Sensitivity=0.0 interrupts on speech detection")
+        print("[PASS] Sensitivity=0.0 interrupts on speech detection")
     
     def test_human_interrupts_on_energy_at_high_sensitivity(self, human_state):
         """Sensitivity=1.0 (Energy): Interrupts on sound detection alone"""
@@ -227,7 +227,7 @@ class TestInterruptionLogic:
         
         # Energy mode: should interrupt on any sound
         assert any(a.type == ActionType.INTERRUPT_AI for a in actions)
-        print("✅ Sensitivity=1.0 interrupts on energy alone")
+        print("[PASS] Sensitivity=1.0 interrupts on energy alone")
     
     def test_hybrid_interruption_at_medium_sensitivity(self, human_state):
         """Sensitivity=0.5 (Hybrid): Energy + speech detection"""
@@ -241,7 +241,7 @@ class TestInterruptionLogic:
             Event(EventType.AUDIO_FRAME, payload={"is_speech": True})
         )
         has_interrupt = any(a.type == ActionType.INTERRUPT_AI for a in actions)
-        print(f"  Hybrid: Energy only → Interrupt? {has_interrupt}")
+        print(f"  Hybrid: Energy only -> Interrupt? {has_interrupt}")
 
 
 class TestActionGeneration:
@@ -269,7 +269,7 @@ class TestActionGeneration:
         
         assert any(a.type == ActionType.SPEAK_SENTENCE for a in actions)
         assert state.is_ai_speaking == True
-        print("✅ AI_SENTENCE_READY generates SPEAK_SENTENCE action")
+        print("[PASS] AI_SENTENCE_READY generates SPEAK_SENTENCE action")
     
     def test_interrupt_ai_action_on_interruption(self, human_state):
         """Interruption should generate INTERRUPT_AI action"""
@@ -285,7 +285,7 @@ class TestActionGeneration:
         assert any(a.type == ActionType.INTERRUPT_AI for a in actions)
         assert state.is_ai_speaking == False
         assert len(state.ai_speech_queue) == 0
-        print("✅ Interruption generates INTERRUPT_AI action and clears queue")
+        print("[PASS] Interruption generates INTERRUPT_AI action and clears queue")
     
     def test_process_turn_action_on_turn_end(self, human_state):
         """Turn end should generate PROCESS_TURN action"""
@@ -300,7 +300,7 @@ class TestActionGeneration:
         )
         
         assert any(a.type == ActionType.PROCESS_TURN for a in actions)
-        print("✅ Turn end generates PROCESS_TURN action")
+        print("[PASS] Turn end generates PROCESS_TURN action")
 
 
 # ============================================================================
@@ -311,7 +311,7 @@ class TestTurnFlows:
     """Test complete conversation turn flows"""
     
     def test_complete_user_turn_to_processing(self, human_state):
-        """Full flow: User speaks → transcribed → Turn ends → Processing"""
+        """Full flow: User speaks -> transcribed -> Turn ends -> Processing"""
         state = human_state
         base_time = time.time()
         
@@ -350,10 +350,10 @@ class TestTurnFlows:
         
         # Should end turn and generate PROCESS_TURN
         assert any(a.type == ActionType.PROCESS_TURN for a in actions)
-        print("✅ Complete user turn flow works")
+        print("[PASS] Complete user turn flow works")
     
     def test_ai_response_sequence(self, human_state):
-        """Full flow: LLM streams → TTS queues sentences → Can be interrupted"""
+        """Full flow: LLM streams -> TTS queues sentences -> Can be interrupted"""
         state = human_state
         
         # Step 1: AI starts responding (sentence by sentence)
@@ -380,7 +380,7 @@ class TestTurnFlows:
         assert any(a.type == ActionType.INTERRUPT_AI for a in actions)
         assert state.is_ai_speaking == False
         assert len(state.ai_speech_queue) == 0
-        print("✅ AI response can be interrupted mid-stream")
+        print("[PASS] AI response can be interrupted mid-stream")
 
 
 # ============================================================================
@@ -407,7 +407,7 @@ class TestProfileBehaviors:
             payload={"is_speech": True}
         ))
         assert not any(a.type == ActionType.INTERRUPT_AI for a in actions)
-        print("✅ IELTS Instructor: No interruptions allowed")
+        print("[PASS] IELTS Instructor: No interruptions allowed")
     
     def test_negotiator_user_priority(self):
         """Human Authority: User always wins"""
@@ -431,7 +431,7 @@ class TestProfileBehaviors:
         
         assert any(a.type == ActionType.INTERRUPT_AI for a in actions)
         assert state.is_ai_speaking == False
-        print("✅ Negotiator: User interruption works immediately")
+        print("[PASS] Negotiator: User interruption works immediately")
 
 
 # ============================================================================
@@ -442,7 +442,7 @@ class TestEdgeCases:
     """Test boundary conditions and edge cases"""
     
     def test_rapid_state_transitions(self, human_state):
-        """Quick speak → pause → speak should work"""
+        """Quick speak -> pause -> speak should work"""
         state = human_state
         
         # Speak
@@ -459,7 +459,7 @@ class TestEdgeCases:
         )
         
         assert state.state_machine == "SPEAKING"
-        print("✅ Rapid transitions handled correctly")
+        print("[PASS] Rapid transitions handled correctly")
     
     def test_force_end_on_safety_timeout(self, human_state):
         """After safety_timeout_ms, turn ends regardless of silence"""
@@ -476,7 +476,7 @@ class TestEdgeCases:
         
         assert state.force_ended == True
         assert any(a.type == ActionType.PROCESS_TURN for a in actions)
-        print("✅ Safety timeout force-ends turn")
+        print("[PASS] Safety timeout force-ends turn")
     
     def test_empty_turn_rejected(self, human_state):
         """Turns with no audio shouldn't be processed"""
@@ -492,7 +492,7 @@ class TestEdgeCases:
         
         # PROCESS_TURN should be generated, but handler should reject it
         assert any(a.type == ActionType.PROCESS_TURN for a in actions)
-        print("✅ Empty turn generates PROCESS_TURN (handler will reject)")
+        print("[PASS] Empty turn generates PROCESS_TURN (handler will reject)")
     
     def test_human_speaking_limit(self):
         """AI speaks ack when user exceeds speaking limit"""
@@ -509,7 +509,7 @@ class TestEdgeCases:
         
         assert any(a.type == ActionType.PLAY_ACK for a in actions)
         assert state.human_speaking_limit_ack_sent == True
-        print("✅ Human speaking limit triggers acknowledgment")
+        print("[PASS] Human speaking limit triggers acknowledgment")
 
 
 # ============================================================================

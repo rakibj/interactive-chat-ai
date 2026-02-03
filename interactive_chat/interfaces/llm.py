@@ -52,7 +52,12 @@ def extract_signals_from_response(response: str) -> Dict[str, Any]:
         }
         </signals>
     
-    This function extracts the JSON block (if present) and returns it.
+    Handles:
+    - Nested JSON objects
+    - Multiple signal blocks
+    - Malformed JSON
+    - Extra whitespace
+    
     Malformed signals are silently ignored to prevent LLM issues from crashing core.
     
     Args:
@@ -61,22 +66,82 @@ def extract_signals_from_response(response: str) -> Dict[str, Any]:
     Returns:
         Dictionary of signals, or empty dict if none found
     """
+    signals_result = {}
+    
+    # Find all <signals>...</signals> blocks
+    signal_blocks = re.findall(
+        r"<signals>\s*(.*?)\s*</signals>",
+        response,
+        re.DOTALL
+    )
+    
+    for block in signal_blocks:
+        signals_dict = _parse_signal_block_json(block.strip())
+        if signals_dict:
+            signals_result.update(signals_dict)
+    
+    # Validate structure: should be {signal_name: {payload}}
+    if isinstance(signals_result, dict):
+        return signals_result
+    
+    return {}
+
+
+def _parse_signal_block_json(text: str) -> Dict[str, Any]:
+    """Parse JSON from signal block with robust error handling.
+    
+    Tries multiple parsing strategies:
+    1. Direct JSON parse (well-formed JSON)
+    2. Matching braces extraction (nested JSON)
+    3. Regex-based extraction (malformed JSON recovery)
+    """
+    if not text or not text.strip():
+        return {}
+    
+    # Strategy 1: Direct JSON parse
     try:
-        # Look for <signals>...</signals> block
-        match = re.search(r"<signals>\s*(\{.*?\})\s*</signals>", response, re.DOTALL)
-        if not match:
-            return {}
-        
-        signals_json = match.group(1)
-        signals = json.loads(signals_json)
-        
-        # Validate structure: should be {signal_name: {payload}}
-        if isinstance(signals, dict):
-            return signals
-        return {}
-    except (json.JSONDecodeError, AttributeError) as e:
-        # Silently ignore malformed signals
-        return {}
+        result = json.loads(text)
+        if isinstance(result, dict):
+            return result
+    except json.JSONDecodeError:
+        pass
+    
+    # Strategy 2: Find matching braces and extract JSON
+    text = text.strip()
+    if text.startswith('{') and text.endswith('}'):
+        try:
+            brace_count = 0
+            for i, char in enumerate(text):
+                if char == '{':
+                    brace_count += 1
+                elif char == '}':
+                    brace_count -= 1
+                
+                # When count returns to 0, we found matching close brace
+                if brace_count == 0 and i > 0:
+                    json_str = text[:i+1]
+                    try:
+                        result = json.loads(json_str)
+                        if isinstance(result, dict):
+                            return result
+                    except json.JSONDecodeError:
+                        pass
+                    break
+        except Exception:
+            pass
+    
+    # Strategy 3: Extract JSON-like structure using regex
+    # Matches {...} with potential nested braces
+    json_match = re.search(r'(\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\})', text)
+    if json_match:
+        try:
+            result = json.loads(json_match.group(1))
+            if isinstance(result, dict):
+                return result
+        except json.JSONDecodeError:
+            pass
+    
+    return {}
 
 
 class LLMInterface(ABC):
