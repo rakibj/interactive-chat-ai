@@ -168,7 +168,7 @@ class PhaseProfile(BaseModel):
 CONVERSATION_START = "human"  # Options: "human" or "ai" (can be overridden per profile)
 ACTIVE_PROFILE = "negotiator"  # Select which profile to use
 ACTIVE_PHASE_PROFILE: Optional[str] = None  # If set, use a PhaseProfile instead of single profile
-ACTIVE_PHASE_PROFILE = "ielts_full_exam"  # Example: set to "ielts_full_exam" to use that profile
+ACTIVE_PHASE_PROFILE = "simple_test"  # Example: set to "ielts_full_exam" to use that profile
 
 # Default LLM Parameters (can be overridden per profile)
 LLM_MAX_TOKENS = 80
@@ -924,6 +924,69 @@ Emit deal_closed or follow_up_scheduled when complete."""
                 from_phase="objection_handling",
                 to_phase="close",
                 trigger_signals=["custom.sales.objection_resolved"],
+                require_all=False
+            ),
+        ],
+    ),
+    
+    "simple_test": PhaseProfile(
+        name="Simple Two-Question Test",
+        initial_phase="question1",
+        phase_context="This is a simple test of the phase system. Ask one question per phase, then transition when user answers.",
+        
+        phases={
+            "question1": InstructionProfile(
+                name="Question 1",
+                start="ai",
+                voice="alba",
+                max_tokens=60,
+                temperature=0.6,
+                pause_ms=800,
+                end_ms=1500,
+                safety_timeout_ms=3000,
+                interruption_sensitivity=0.3,
+                authority="ai",
+                human_speaking_limit_sec=30,
+                acknowledgments=["Thank you.", "Got it.", "I see."],
+                signals={
+                    "test.answer_received": "User has answered the question.",
+                },
+                instructions="""You are conducting a simple test.
+
+TASK: Ask the user ONE question: "What is your favorite color?"
+
+After they answer, emit the answer_received signal to proceed to the next question."""
+            ),
+            
+            "question2": InstructionProfile(
+                name="Question 2",
+                start="ai",
+                voice="alba",
+                max_tokens=60,
+                temperature=0.6,
+                pause_ms=800,
+                end_ms=1500,
+                safety_timeout_ms=3000,
+                interruption_sensitivity=0.3,
+                authority="ai",
+                human_speaking_limit_sec=30,
+                acknowledgments=["Thank you.", "Got it.", "I see."],
+                signals={
+                    "test.complete": "User has answered the second question.",
+                },
+                instructions="""You are conducting a simple test - second question.
+
+TASK: Ask the user ONE question: "What is your favorite animal?"
+
+After they answer, emit the test.complete signal and thank them for participating."""
+            ),
+        },
+        
+        transitions=[
+            PhaseTransition(
+                from_phase="question1",
+                to_phase="question2",
+                trigger_signals=["custom.test.answer_received"],
                 require_all=False
             ),
         ],

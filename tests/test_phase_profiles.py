@@ -1,11 +1,14 @@
 """Test script for PhaseProfile system - demonstrates deterministic phase transitions."""
 import sys
 from pathlib import Path
+import queue
+import threading
 
 # Add project to path
 sys.path.insert(0, str(Path(__file__).parent / "interactive_chat"))
 
-from config import PHASE_PROFILES, PhaseProfile, InstructionProfile
+from config import PHASE_PROFILES, PhaseProfile, InstructionProfile, get_profile_settings
+from core.event_driven_core import SystemState, Event, EventType, Reducer
 
 
 def test_phase_profile_structure():
@@ -121,6 +124,71 @@ def test_standalone_vs_phase_mode():
     print(f"   Signals: {list(phase_profile_phase.signals.keys())}")
     
     print(f"\n✅ Both use the same InstructionProfile model!")
+
+
+def test_phase_profile_end_to_end_simple():
+    """End-to-end style test for simple_test profile through terminal phase."""
+    simple = PHASE_PROFILES["simple_test"]
+
+    # Build a lightweight ConversationEngine surrogate without threads/audio
+    engine = object.__new__(type("FakeEngine", (), {}))
+    engine.active_phase_profile = simple
+    engine.phase_emitted_signals = []
+    engine.event_queue = queue.Queue()
+    engine.shutdown_event = threading.Event()
+    engine.shutdown_requested = False
+    engine._generate_ai_turn = lambda *args, **kwargs: None  # Stub: avoid TTS/LLM
+
+    current_profile = simple.get_phase(simple.initial_phase)
+    engine.profile_settings = get_profile_settings(None, current_profile)
+    engine.state = SystemState(
+        authority=engine.profile_settings.get("authority", "human"),
+        pause_ms=engine.profile_settings["pause_ms"],
+        end_ms=engine.profile_settings["end_ms"],
+        safety_timeout_ms=engine.profile_settings["safety_timeout_ms"],
+        interruption_sensitivity=engine.profile_settings["interruption_sensitivity"],
+        human_speaking_limit_sec=engine.profile_settings.get("human_speaking_limit_sec"),
+        current_phase_id=simple.initial_phase,
+        phase_profile_name=simple.name,
+    )
+
+    def _request_shutdown_stub():
+        engine.shutdown_requested = True
+        engine.shutdown_event.set()
+
+    # Bind methods from the real ConversationEngine
+    from interactive_chat.main import ConversationEngine
+    engine._check_phase_transitions = ConversationEngine._check_phase_transitions.__get__(engine)
+    engine._transition_to_phase = ConversationEngine._transition_to_phase.__get__(engine)
+    engine._request_shutdown = _request_shutdown_stub
+
+    # 1) No transition on stray progress signal
+    engine._check_phase_transitions(["custom.test.progress"])
+    assert engine.event_queue.empty()
+    assert not engine.shutdown_event.is_set()
+
+    # 2) Transition to question2 on answer_received
+    engine._check_phase_transitions(["custom.test.answer_received"])
+    evt = engine.event_queue.get_nowait()
+    assert evt.type == EventType.PHASE_TRANSITION
+    assert evt.payload["next_phase"] == "question2"
+
+    # Apply reducer action to move phase
+    _, actions = Reducer.reduce(engine.state, evt)
+    for action in actions:
+        if action.type == action.type.TRANSITION_PHASE:
+            engine._transition_to_phase(action.payload["next_phase"])
+
+    assert engine.state.current_phase_id == "question2"
+    assert engine.phase_emitted_signals == []  # Cleared on transition
+
+    # 3) Terminal phase should not end on unrelated signal
+    engine._check_phase_transitions(["custom.test.progress"])
+    assert not engine.shutdown_requested
+
+    # 4) Terminal phase ends only after its own completion signal
+    engine._check_phase_transitions(["custom.test.complete"])
+    assert engine.shutdown_requested
 
 
 if __name__ == "__main__":

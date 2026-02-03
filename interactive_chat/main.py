@@ -204,7 +204,8 @@ class ConversationEngine:
 
     def _tts_worker(self) -> None:
         """Process TTS sentences from REDUCER ACTIONS."""
-        while not self.shutdown_event.is_set():
+        # Drain any queued speech even if shutdown has been requested.
+        while not self.shutdown_event.is_set() or not self.speech_to_speak_queue.empty():
             try:
                 text = self.speech_to_speak_queue.get(timeout=0.1)
                 
@@ -221,6 +222,24 @@ class ConversationEngine:
                 time.sleep(0.1) # Small gap between sentences
             except queue.Empty:
                 pass
+
+    def _request_shutdown(self) -> None:
+        """Gracefully stop processing after pending speech finishes."""
+        if self.shutdown_event.is_set():
+            return
+        # Wait for any queued speech to finish (bounded wait)
+        try:
+            self.speech_to_speak_queue.join()
+        except Exception:
+            pass
+
+        start_wait = time.time()
+        while (self.state.is_ai_speaking or not self.speech_to_speak_queue.empty()) and (time.time() - start_wait) < 5:
+            time.sleep(0.05)
+
+        self.shutdown_event.set()
+        # Stop hardware streams
+        self.audio_manager.stop()
 
     def _start_tts_worker(self) -> None:
         threading.Thread(target=self._tts_worker, daemon=True).start()
@@ -250,8 +269,14 @@ class ConversationEngine:
             
         elif action.type == ActionType.SPEAK_SENTENCE:
             text = action.payload.get("text")
-            self.speech_to_speak_queue.put(text)
-            self.state.turn_ai_transcript += text + " "
+            # Additional safety: strip any signal tags that might have slipped through
+            import re
+            text = re.sub(r'<signals.*?</signals>', '', text, flags=re.DOTALL).strip()
+            text = re.sub(r'<signals.*$', '', text, flags=re.DOTALL).strip()
+            if text:  # Only queue if there's actual text after cleaning
+                self.speech_to_speak_queue.put(text)
+                self.state.turn_ai_transcript += text + " "
+
 
         elif action.type == ActionType.PROCESS_TURN:
             reason = action.payload.get("reason")
@@ -360,6 +385,26 @@ class ConversationEngine:
                 "phase_manager",
                 {"next_phase": next_phase}
             ))
+            return
+
+        # No transition fired. Check if this is a terminal phase. Only
+        # consider shutdown when a signal that belongs to THIS phase has been
+        # emitted (ignores stray signals carried over from previous phases).
+        has_transitions = any(
+            t.from_phase == self.state.current_phase_id 
+            for t in self.active_phase_profile.transitions
+        )
+        if not has_transitions:
+            current_phase_profile = self.active_phase_profile.get_phase(self.state.current_phase_id)
+            allowed_signals = {f"custom.{name}" for name in (current_phase_profile.signals.keys() if current_phase_profile else [])}
+            # Only terminate if at least one allowed signal for this phase was emitted
+            if allowed_signals and any(sig in allowed_signals for sig in self.phase_emitted_signals):
+                print(f"\n{'='*60}")
+                print(f"✅ Phase Profile Complete: {self.active_phase_profile.name}")
+                print(f"{'='*60}\n")
+                print("All phases completed. Shutting down gracefully...")
+                time.sleep(0.5)  # Brief pause before shutdown
+                self._request_shutdown()
     
     def _get_current_system_prompt(self) -> str:
         """Get system prompt for current profile/phase."""
@@ -398,9 +443,11 @@ class ConversationEngine:
                     # Check if signals block is starting (check for opening tag)
                     if "<signals" in full_response and not signals_started:
                         signals_started = True
-                        # Send any remaining incomplete sentence before signals
-                        if current_sentence.strip():
-                            self.event_queue.put(Event(EventType.AI_SENTENCE_READY, time.time(), "llm", {"text": current_sentence.strip()}))
+                        # Strip any partial signal tags from current_sentence before sending
+                        import re
+                        clean_sentence = re.sub(r'<signals.*$', '', current_sentence, flags=re.DOTALL).strip()
+                        if clean_sentence:
+                            self.event_queue.put(Event(EventType.AI_SENTENCE_READY, time.time(), "llm", {"text": clean_sentence}))
                         current_sentence = ""
                         continue
                     
@@ -496,9 +543,11 @@ class ConversationEngine:
                     # Check if signals block is starting (check for opening tag)
                     if "<signals" in full_response and not signals_started:
                         signals_started = True
-                        # Send any remaining incomplete sentence before signals
-                        if current_sentence.strip():
-                            self.event_queue.put(Event(EventType.AI_SENTENCE_READY, time.time(), "llm", {"text": current_sentence.strip()}))
+                        # Strip any partial signal tags from current_sentence before sending
+                        import re
+                        clean_sentence = re.sub(r'<signals.*$', '', current_sentence, flags=re.DOTALL).strip()
+                        if clean_sentence:
+                            self.event_queue.put(Event(EventType.AI_SENTENCE_READY, time.time(), "llm", {"text": clean_sentence}))
                         current_sentence = ""
                         continue
                     
@@ -563,12 +612,12 @@ class ConversationEngine:
                 except queue.Empty:
                     # Drive state machine forward for timeouts even without external events
                     self.event_queue.put(Event(EventType.TICK, time.time()))
-                    
         except KeyboardInterrupt:
             print("\n🛑 Shutting down...")
-            self.shutdown_event.set()
+            self._request_shutdown()
+        finally:
+            # Ensure resources are stopped and analytics saved even for graceful exits
             self.audio_manager.stop()
-            # Generate analytics summary
             self.session_analytics.save_summary()
             print("✅ Goodbye!")
 
