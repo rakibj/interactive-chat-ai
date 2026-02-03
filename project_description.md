@@ -2,16 +2,18 @@
 
 ## Overview
 
-A real-time voice conversation system with configurable AI personas, advanced interruption handling, and multi-modal ASR/TTS capabilities. Built for natural, low-latency human-AI voice interactions with sophisticated turn-taking logic.
+A real-time voice conversation system with configurable AI personas, advanced interruption handling, and multi-modal ASR/TTS capabilities. Built for natural, low-latency human-AI voice interactions with sophisticated turn-taking logic. Includes REST/WebSocket API and Gradio web UI for real-time conversation monitoring.
 
 **Key Features**:
 
 - Event-driven architecture with deterministic state machine reducer
-- **Phased AI system with signal-driven transitions** (NEW)
+- **Phased AI system with signal-driven transitions**
 - Decoupled signals layer for optional plugin/dashboard integration without core modification
 - Multi-authority modes (human, AI, default) with profile-based turn-taking
 - Human speaking limit enforcement for controlled conversation dynamics
 - Comprehensive analytics with per-turn metrics logging
+- **REST API + WebSocket streaming** for real-time UI integration
+- **Gradio demo UI** with live phase tracking and speaker status
 
 ## Technology Stack
 
@@ -70,7 +72,7 @@ interactive-chat-ai/
 
 ### 1. ConversationEngine (`main.py`)
 
-**Purpose**: Orchestration engine based on event-driven dispatcher loop with integrated analytics.
+**Purpose**: Orchestration engine based on event-driven dispatcher loop with integrated analytics, now integrated with FastAPI server for real-time state access.
 
 **Key Responsibilities**:
 
@@ -79,6 +81,15 @@ interactive-chat-ai/
 - Coordinating asynchronous turn processing (transcription → LLM → TTS)
 - Capturing turn metrics for analytics logging
 - Graceful shutdown management
+- Registering with FastAPI server for API/UI integration (via `set_engine()` call)
+
+**API Integration** (Phase 3):
+
+- Engine starts, creates FastAPI server in background thread
+- Engine registers itself with server via `set_engine(engine)` function
+- API endpoints now access live engine state: `_engine.state`, `_engine.active_phase_profile`
+- Windows Unicode support added for emoji in console output
+- **Status**: ✅ Working - API returns 200 with real-time engine data
 
 **Event Loop**:
 
@@ -1102,6 +1113,44 @@ acknowledgments=["Okay.", "Noted.", "Got it."]
 - Integration tests: Endpoint behavior, session lifecycle, rate limiting, API contracts
 
 **Total Test Count**: ✅ 162 tests (110 Phase 1 + 52 Phase 2), all passing
+
+---
+
+### Phase 3: Engine Integration & Gradio Demo (Complete) ✅
+
+**Engine/API Integration**:
+
+- ConversationEngine now starts FastAPI server in background thread
+- Engine registers itself with server via `set_engine()` for live state access
+- API endpoints safely access engine attributes: `_engine.state`, `_engine.active_phase_profile`
+- Graceful fallback for missing attributes (conversation history, phase profiles)
+- Fixed Windows Unicode console encoding for emoji output
+- **Status**: ✅ Working - API responds with 200 status and real-time data
+
+**Gradio UI Integration**:
+
+- `gradio_demo.py` (550 lines) provides complete web interface
+- Real-time state polling via HTTP: current phase, speaker, processing status
+- Manual refresh button for conversation view
+- Message history display (empty until turns are processed)
+- Responsive grid layout with phase progress indicators
+
+**Phase 3 Models** (no new models, uses Phase 1/2 schemas)
+
+**Phase 3 Test Coverage**: ✅ 39 tests for Gradio UI components and integration
+
+**Total Test Count**: ✅ 201 tests passing (162 Phase 1/2 + 39 Phase 3)
+
+**Initialization Sequence**:
+
+```
+1. Main starts
+2. ConversationEngine created and initialized
+3. FastAPI server created and started in background thread
+4. Engine registers with server via set_engine()
+5. Engine.run() blocks, starts main event loop
+6. API is live and accessible while engine processes turns
+```
 
 ### Single-User Limitation (Phase 1) ⚠️
 
