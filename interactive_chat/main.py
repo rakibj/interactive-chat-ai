@@ -298,6 +298,7 @@ class ConversationEngine:
                 turn_id=payload.get("turn_id", 0),
                 timestamp=payload.get("timestamp", time.time()),
                 profile_name=self.profile_settings["name"],
+                phase_id=self.state.current_phase_id if self.active_phase_profile else None,
                 human_speech_duration_sec=payload.get("total_latency_ms", 0) / 1000.0 if payload.get("total_latency_ms") else 0,
                 ai_speech_duration_sec=0,  # Will be captured from TTS
                 silence_before_end_ms=0,

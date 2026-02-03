@@ -15,37 +15,28 @@ class TurnAnalytics:
     turn_id: int
     timestamp: float
     profile_name: str
-    
-    # Timing
     human_speech_duration_sec: float
     ai_speech_duration_sec: float
     silence_before_end_ms: float
-    
-    # Interruptions
     interrupt_attempts: int
     interrupts_accepted: int
     interrupts_blocked: int
     interrupt_trigger_reasons: List[str]
-    
-    # Turn Decisions
     end_reason: str  # "silence", "confidence", "safety_timeout", "forced_cutoff"
     authority_mode: str
     sensitivity_value: float
-    
-    # ASR Signals
     partial_transcript_lengths: List[int]
     final_transcript_length: int
     confidence_score_at_cutoff: float
-    
-    # Latency
     transcription_ms: float
     llm_generation_ms: float
     total_latency_ms: float
-    
-    # Transcripts
     human_transcript: str
     ai_transcript: str
     transcript_timestamp: float  # When turn was processed
+    
+    # Optional: Current phase if using PhaseProfile, else None (NEW)
+    phase_id: Optional[str] = None
     
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""

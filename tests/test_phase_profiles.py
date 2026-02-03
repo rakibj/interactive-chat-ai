@@ -5,7 +5,7 @@ import queue
 import threading
 
 # Add project to path
-sys.path.insert(0, str(Path(__file__).parent / "interactive_chat"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "interactive_chat"))
 
 from config import PHASE_PROFILES, PhaseProfile, InstructionProfile, get_profile_settings
 from core.event_driven_core import SystemState, Event, EventType, Reducer

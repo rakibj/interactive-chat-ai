@@ -764,6 +764,7 @@ Structured logging for conversation behavior to enable data-driven tuning of int
 - **Transcripts**: Full user transcript, full AI transcript, partial ASR history
 - **Latency Details**: Per-component timing breakdown
 - **State**: Authority mode, interruption sensitivity setting, confidence scores
+- **Phase Tracking** (NEW): Current phase ID if using PhaseProfile mode (tracks which phase produced each turn)
 
 ### Output Files
 
@@ -774,15 +775,16 @@ One JSON object per line, written automatically when each turn completes:
 {
   "turn_id": 0,
   "timestamp": 1738515601.234,
-  "profile_name": "Negotiation (Buyer)",
-  "human_transcript": "What's your best price?",
-  "ai_transcript": "I can offer $79 per month.",
-  "interrupt_attempts": 2,
-  "interrupts_accepted": 1,
-  "interrupts_blocked": 1,
+  "profile_name": "IELTS Speaking Test (Full)",
+  "phase_id": "part1",
+  "human_transcript": "I am from Beijing.",
+  "ai_transcript": "Interesting. Tell me more about your hometown.",
+  "interrupt_attempts": 0,
+  "interrupts_accepted": 0,
+  "interrupts_blocked": 0,
   "end_reason": "silence",
-  "authority_mode": "default",
-  "sensitivity_value": 0.6,
+  "authority_mode": "ai",
+  "sensitivity_value": 0.3,
   "transcription_ms": 903.9,
   "llm_generation_ms": 366.7,
   "total_latency_ms": 1270.6
@@ -804,6 +806,19 @@ Aggregated metrics across all turns, generated at session end:
   "avg_llm_generation_ms": 366.7
 }
 ```
+
+### PhaseProfile Integration (NEW)
+
+When using PhaseProfile mode, each turn's analytics are automatically tagged with the current `phase_id`. This enables:
+
+- **Phase-specific performance analysis**: Compare latency, interruption rates, and effectiveness across phases
+- **Phase transitions tracking**: Observe which signals triggered transitions and when
+- **Behavioral patterns**: Identify if authority modes, sensitivity settings, or turn characteristics vary by phase
+- **Quality metrics per phase**: Measure interruption acceptance, ASR accuracy, and LLM latency per exam/sales/tutorial phase
+
+Example query: _"In part2 (long monologue), what was the average interruption acceptance rate?"_
+
+The `phase_id` field is `None` for standalone InstructionProfile mode (single-phase conversations).
 
 ### Analysis Examples
 
