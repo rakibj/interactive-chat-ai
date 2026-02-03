@@ -60,24 +60,42 @@ interactive-chat-ai/
 
 ### 1. ConversationEngine (`main.py`)
 
-**Purpose**: Orchestration engine based on an Event-Driven dispatcher loop.
+**Purpose**: Orchestration engine based on event-driven dispatcher loop with integrated analytics.
 
 **Key Responsibilities**:
 
-- Running the Main Event Loop
-- Executing Side-Effects (`Action`s)
-- Coordinating asynchronous turn processing (transcription -> LLM -> TTS)
+- Running the Main Event Loop (get events, reduce state, handle actions)
+- Executing Side-Effects from `Action` objects (speak, interrupt, log, play acknowledgments)
+- Coordinating asynchronous turn processing (transcription → LLM → TTS)
+- Capturing turn metrics for analytics logging
 - Graceful shutdown management
 
-**The Event Loop**:
+**Event Loop**:
 
 ```python
 while not shutdown:
     event = event_queue.get()
     state, actions = Reducer.reduce(state, event)
     for action in actions:
-        _handle_action(action)
+        _handle_action(action)  # Execute side effects
 ```
+
+**Action Handlers**:
+
+- `LOG`: Print messages
+- `INTERRUPT_AI`: Set interrupt flag, clear queues
+- `PLAY_ACK`: Thread acknowledgment playback
+- `SPEAK_SENTENCE`: Queue text for TTS
+- `PROCESS_TURN`: Run turn processing asynchronously
+- `LOG_TURN` (NEW): Create TurnAnalytics and call `session_analytics.log_turn()`
+
+**Timing Capture** (NEW):
+`_process_turn_async()` measures and stores:
+
+- ASR transcription latency
+- LLM generation latency
+- Total processing latency
+- Final user and AI transcripts
 
 ### 2. Event-Driven Core (`core/event_driven_core.py`)
 
@@ -85,10 +103,31 @@ while not shutdown:
 
 **Components**:
 
-- **SystemState**: Single source of truth (dataclass)
+- **SystemState**: Single source of truth (dataclass) with turn metrics tracking
 - **Event**: Standardized inputs (VAD, Audio, ASR, AI Status, TICK timer)
-- **Action**: Deterministic side-effect triggers (Interrupt, ProcessTurn, Log)
+- **Action**: Deterministic side-effect triggers (Interrupt, ProcessTurn, Log, PlayAck, SpeakSentence, **LogTurn**)
 - **Reducer**: Pure function for state transitions with explicit TICK event handler
+
+**Action Types**:
+
+- `LOG`: Print diagnostic messages
+- `INTERRUPT_AI`: Stop AI speech immediately
+- `PROCESS_TURN`: Trigger transcription/LLM processing
+- `PLAY_ACK`: Play acknowledgment sound
+- `SPEAK_SENTENCE`: Queue sentence for TTS
+- `LOG_TURN`: Emit turn analytics (NEW)
+
+**Turn Metrics Tracking** (NEW):
+SystemState now tracks per-turn metrics for automatic analytics logging:
+
+- `turn_interrupt_attempts`: Count of interruption checks
+- `turn_interrupt_accepts`: Successful interruptions
+- `turn_partial_transcripts`: List of ASR partial texts
+- `turn_final_transcript`: Final user transcription
+- `turn_ai_transcript`: Complete AI response
+- `turn_end_reason`: Why turn ended (silence, safety_timeout, limit_exceeded)
+- `turn_transcription_ms`, `turn_llm_generation_ms`, `turn_total_latency_ms`: Latency metrics
+- `turn_confidence_score`: ASR confidence
 
 **TICK Event Handler**:
 
@@ -96,6 +135,15 @@ while not shutdown:
 - Advances time-based state transitions (e.g., PAUSING → IDLE)
 - Enables safety timeout logic to function correctly
 - Called continuously by main event loop to ensure responsive timing
+
+**Metric Collection Flow**:
+
+1. **Turn Begins**: VAD_SPEECH_START sets `turn_start_time`
+2. **During Turn**: AUDIO_FRAME counts interrupt attempts; ASR_PARTIAL_TRANSCRIPT collects texts
+3. **Turn Ends**: PAUSING state sets `turn_end_reason`
+4. **Processing**: PROCESS_TURN action triggers `_process_turn_async()` with timing capture
+5. **Logging**: RESET_TURN event emits LOG_TURN action with complete metrics
+6. **Output**: LOG_TURN handler calls `session_analytics.log_turn()`
 
 ### 2. AudioManager (`core/audio_manager.py`)
 
@@ -476,49 +524,82 @@ LLM_BACKEND = "groq"  # or "local", "openai", "deepseek"
 
 ### Purpose
 
-Structured logging for conversation behavior to enable data-driven tuning of interruption sensitivity, pause thresholds, and confidence scores.
+Structured logging for conversation behavior to enable data-driven tuning of interruption sensitivity, pause thresholds, and confidence scores. Fully integrated into event-driven architecture via LOG_TURN action.
+
+### Integration
+
+**Event-Driven Collection**:
+
+- Metrics captured automatically during state transitions (no manual calls)
+- LOG_TURN action emitted when turn completes (RESET_TURN event)
+- Handler converts SystemState turn metrics → TurnAnalytics dataclass → JSONL log
+- Works with all profiles, ASR backends, and LLM backends
 
 ### Components
 
 **`core/analytics.py`**:
 
-- `TurnAnalytics` dataclass: 40+ metrics per turn
+- `TurnAnalytics` dataclass: Immutable turn record with 40+ metrics
 - `SessionAnalytics` class: JSONL logging and summary generation
+
+**`core/event_driven_core.py`** (NEW):
+
+- `LOG_TURN` action type: Carries all turn metrics when turn completes
+- SystemState turn metrics: 12 fields tracking throughout turn lifecycle
+- Metric collection in Reducer: Counts, transcripts, timings, end reasons
+
+**`main.py`** (NEW):
+
+- LOG_TURN action handler: Converts metrics → TurnAnalytics → logs to JSONL
+- Timing capture in `_process_turn_async()`: ASR and LLM latency measured
+- Transcript accumulation: AI text gathered during sentence streaming
 
 **Metrics Tracked**:
 
-- **Timing**: Human/AI speech duration, silence before turn end
-- **Interruptions**: Attempts, accepted/blocked counts, trigger reasons
-- **Turn Decisions**: End reason, authority mode, sensitivity value
-- **ASR Signals**: Partial transcript lengths, final length, confidence score
-- **Latency**: Transcription, LLM generation, total
-- **Transcripts**: Full human and AI text with timestamps
+- **Timing**: Transcription latency, LLM generation latency, total latency
+- **Interruptions**: Attempts, accepted count, blocked count, trigger reasons
+- **Turn Decisions**: End reason (silence/timeout/limit), authority mode, sensitivity
+- **Transcripts**: Full user transcript, full AI transcript, partial ASR history
+- **Latency Details**: Per-component timing breakdown
+- **State**: Authority mode, interruption sensitivity setting, confidence scores
 
 ### Output Files
 
 **Per-Turn JSONL** (`logs/session_YYYYMMDD_HHMMSS.jsonl`):
+One JSON object per line, written automatically when each turn completes:
 
 ```json
 {
   "turn_id": 0,
-  "human_transcript": "Hey, how's it going?",
-  "ai_transcript": "Not bad, just looking at this laptop.",
-  "transcript_timestamp": 1738515601.234,
+  "timestamp": 1738515601.234,
+  "profile_name": "Negotiation (Buyer)",
+  "human_transcript": "What's your best price?",
+  "ai_transcript": "I can offer $79 per month.",
   "interrupt_attempts": 2,
   "interrupts_accepted": 1,
+  "interrupts_blocked": 1,
   "end_reason": "silence",
-  "total_latency_ms": 1471.0
+  "authority_mode": "default",
+  "sensitivity_value": 0.6,
+  "transcription_ms": 903.9,
+  "llm_generation_ms": 366.7,
+  "total_latency_ms": 1270.6
 }
 ```
 
 **Session Summary** (`logs/session_YYYYMMDD_HHMMSS_summary.json`):
+Aggregated metrics across all turns, generated at session end:
 
 ```json
 {
+  "session_id": "session_20260202_230800",
   "total_turns": 15,
-  "avg_total_latency_ms": 1370.7,
+  "session_duration_sec": 287.5,
+  "avg_total_latency_ms": 1270.6,
   "interrupt_acceptance_rate": 0.75,
-  "end_reason_distribution": { "silence": 10, "safety_timeout": 5 }
+  "end_reason_distribution": { "silence": 10, "safety_timeout": 5 },
+  "avg_transcription_ms": 903.9,
+  "avg_llm_generation_ms": 366.7
 }
 ```
 
