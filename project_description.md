@@ -163,6 +163,7 @@ SystemState now tracks per-turn metrics for automatic analytics logging:
 **Signal Sources**:
 
 **Framework Signals** (from core reducer):
+
 - `conversation.interrupted`: User interrupted AI speech
 - `conversation.speaking_limit_exceeded`: User exceeded speaking duration limit
 - `llm.generation_start`: LLM began response generation
@@ -171,6 +172,7 @@ SystemState now tracks per-turn metrics for automatic analytics logging:
 - `analytics.turn_metrics_updated`: Complete turn metrics logged
 
 **LLM-Emitted Signals** (custom per profile):
+
 - Extracted from LLM response as `<signals>{JSON}</signals>` blocks
 - Prefixed with `custom.` namespace (e.g., `custom.exam.question_asked`)
 - Profile-specific, defined in `InstructionProfile.signals` dict
@@ -377,19 +379,20 @@ class InstructionProfile(BaseModel):
 ```python
 for token in llm.stream_completion(...):
     full_response += token
-    
+
     if "<signals" in full_response and not signals_started:
         signals_started = True
         # Send any remaining incomplete sentence
         # Then silently collect signal block
         continue
-    
+
     if not signals_started:
         # Process as normal (send to TTS on punctuation)
     # else: buffer silently
 ```
 
 **Benefits**:
+
 - Low latency for main response (streaming + sentence-level)
 - Zero signal contamination (signal blocks never reach TTS)
 - Minimal buffering (only trailing signal block)
@@ -402,6 +405,7 @@ for token in llm.stream_completion(...):
 - `_generate_ai_turn()`: AI-initiated turn (LLM → TTS, no ASR). Used for greetings when `start="ai"`
 
 **Benefits**:
+
 - Profiles starting with `start="ai"` can greet first
 - Cleaner initialization (no dummy audio needed)
 - Reusable for proactive AI statements
