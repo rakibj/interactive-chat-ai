@@ -9,6 +9,8 @@ This skill ensures `project_description.md` stays synchronized with the current 
 
 ## When to use this skill
 
+Use `project_description.md` when a new chat was started and you need to understand the project architecture. 
+
 Update `project_description.md` when changes are **meaningful**:
 
 ✅ **Update for these changes:**

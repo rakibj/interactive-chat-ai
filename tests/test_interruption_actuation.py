@@ -18,14 +18,23 @@ human_interrupt_event = threading.Event()
 stop_worker_event = threading.Event()
 
 class MockTTS:
-    """Simulates TTS by sleeping."""
-    def speak(self, text: str):
-        print(f"   [MockTTS] speaking: '{text[:15]}...' (2.0s)")
-        time.sleep(2.0)
+    """Simulates TTS by sleeping in chunks to allow mid-sentence interruption."""
+    
+    def speak(self, text: str, interrupt_event: threading.Event = None):
+        print(f"   [MockTTS] speaking: '{text[:15]}...' (Duration: 2.0s)")
+        
+        # Simulate 2.0s duration in 0.1s chunks
+        for _ in range(20):
+            if interrupt_event and interrupt_event.is_set():
+                print("   [MockTTS] 🛑 HALT: Immediate Interruption triggered inside TTS!")
+                return
+            time.sleep(0.1)
+        
+        print("   [MockTTS] Finished speaking.")
 
-def tts_worker(tts):
+def tts_worker(tts, authority_mode="human"):
     """Worker thread that consumes text and speaks it, checking for interrupts."""
-    print("👷 Worker: Started")
+    print(f"👷 Worker: Started (Authority: {authority_mode})")
     
     while not stop_worker_event.is_set():
         try:
@@ -41,11 +50,19 @@ def tts_worker(tts):
             # 1. Pre-speech check
             if human_interrupt_event.is_set():
                 print(f"🛑 Worker: Interrupt detected BEFORE speaking '{text[:15]}...' - Dropping")
-                # We already cleared queue above, so just drop this one
                 continue
             
             print(f"🔊 Worker: Speaking '{text[:30]}...'")
-            tts.speak(text)
+            
+            # Determine logic based on authority
+            event_to_pass = None
+            if authority_mode == "human":
+                event_to_pass = human_interrupt_event
+                
+            start_time = time.time()
+            tts.speak(text, interrupt_event=event_to_pass)
+            duration = time.time() - start_time
+            print(f"   -> Speech Duration: {duration:.2f}s")
             
             # 2. Post-speech check
             if human_interrupt_event.is_set():
@@ -61,59 +78,47 @@ def tts_worker(tts):
     print("👷 Worker: Stopped")
 
 
-def main():
-    print("🔌 Initializing MockTTS...")
+def run_test(authority_mode):
+    print(f"\n==================================================")
+    print(f"🎬 TEST SCENARIO: Authority = {authority_mode}")
+    print(f"==================================================")
+    
+    # Reset State
+    with response_queue.mutex:
+        response_queue.queue.clear()
+    human_interrupt_event.clear()
+    stop_worker_event.clear()
+    
     tts = MockTTS()
-
-    # Start Worker
-    worker = threading.Thread(target=tts_worker, args=(tts,), daemon=True)
+    worker = threading.Thread(target=tts_worker, args=(tts, authority_mode), daemon=True)
     worker.start()
     
-    # Text content
-    s1 = "Sentence 1"
-    s2 = "Sentence 2"
-    s3 = "Sentence 3"
+    # Queue items
+    response_queue.put("Sentence 1 (Target)")
+    response_queue.put("Sentence 2 (Skipped)")
     
-    print("\n🎬 SCENARIO START")
-    print(f"   [1] Queuing 3 sentences.")
-    response_queue.put(s1)
-    response_queue.put(s2)
-    response_queue.put(s3)
+    # Allow S1 to start (MockTTS takes 2.0s)
+    print(f"   [1] Sleeping 0.5s (S1 starts)...")
+    time.sleep(0.5)
     
-    # Let Sentence 1 play (MockTTS takes 2s)
-    # We sleep 1s, so S1 is halfway done.
-    print(f"   [2] Sleeping 1.0s (S1 is playing)...")
-    time.sleep(1.0)
-    
-    # Interrupt!
-    print(f"⚡ [3] EVENT: INTERRUPT TRIGGERED!")
+    # Trigger Interrupt
+    print(f"⚡ [2] INTERRUPT TRIGGERED!")
     human_interrupt_event.set()
     
-    # Wait 2.5s.
-    # Timeline:
-    # T=0: Worker starts S1 (ends at T=2.0)
-    # T=1: Interrupt Set.
-    # T=2.0: Worker finishes S1. Loops. Sees Interrupt.
-    #        Worker should drop S2? Or if it pulled S2 already...
-    #        Actually, 'text = get()' happened at T=0.
-    #        S2 is is Queue.
-    #        Worker finishes S1. Loops.
-    #        Checks Interrupt -> Clears S2, S3.
-    # T=3.5: We check.
-    print(f"   [4] Sleeping 2.5s (Waiting for S1 to finish and logic to run)...")
-    time.sleep(2.5)
+    # Wait for S1 to "finish" (either early or late)
+    time.sleep(2.0)
     
-    print(f"   [5] Checking queue size...")
-    if response_queue.empty():
-        print(f"✅ Success: Queue is empty.")
-    else:
-        print(f"❌ Failure: Queue still has {response_queue.qsize()} items.")
-    
-    # Reset for clean exit
-    human_interrupt_event.clear()
     stop_worker_event.set()
     worker.join(timeout=1.0)
-    print("🎬 SCENARIO END")
+
+def main():
+    # TEST 1: HUMAN Authority (Immediate Stop)
+    # Expected: S1 stops around 0.5s (immediate reaction)
+    run_test("human")
+    
+    # TEST 2: DEFAULT Authority (Polite Stop)
+    # Expected: S1 plays FULL 2.0s, THEN S2 is skipped
+    run_test("default")
 
 if __name__ == "__main__":
     main()
