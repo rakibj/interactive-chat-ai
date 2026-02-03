@@ -8,6 +8,7 @@
 ## What's New
 
 ### 1. WebSocket Event Streaming (`/ws`)
+
 - Real-time event streaming to clients
 - Session-based connections with UUID generation
 - Event buffering (100 events per session) for catch-up on reconnect
@@ -15,6 +16,7 @@
 - Proper connection lifecycle and cleanup
 
 ### 2. Session Management
+
 - Per-session event buffer isolation
 - Session state machine (INITIALIZING → ACTIVE → PAUSED → COMPLETED)
 - 30-minute session TTL with inactivity tracking
@@ -22,17 +24,20 @@
 - Connection tracking per session
 
 ### 3. Rate Limiting
+
 - **5 connections per IP address** (prevents local abuse)
 - **1000 events per minute per session** (prevents event floods)
 - **1000 max concurrent sessions** (resource limit)
 
 ### 4. API Limitations Documentation
+
 - New endpoint: `GET /api/limitations`
 - Lists all known constraints with workarounds
 - Single-user limitation clearly documented
 - Phase 2/3 fixes referenced for each limitation
 
 ### 5. Pydantic Models (5 New)
+
 - `SessionState`: Enum for session lifecycle
 - `SessionInfo`: Session metadata with UUID
 - `WSEventMessage`: All WebSocket messages (with message_id for dedup)
@@ -60,6 +65,7 @@ docs/
 ## Test Results
 
 ### Test Breakdown
+
 - **Phase 1 Tests**: 110 tests (all still passing) ✅
 - **Phase 2 Contract Tests**: 26 tests (WebSocket specification)
 - **Phase 2 Integration Tests**: 26 tests (endpoint + component integration)
@@ -68,6 +74,7 @@ docs/
 ### Test Categories
 
 **WebSocket Contract Tests** (TDD-first specification):
+
 - Connection lifecycle (create, resume, reject invalid)
 - Event streaming (VAD, TTS, phase changes, turns)
 - Event buffering & catch-up
@@ -80,6 +87,7 @@ docs/
 - Performance characteristics
 
 **Integration Tests**:
+
 - `/api/limitations` endpoint
 - WebSocket endpoint integration
 - Session lifecycle with real SessionManager
@@ -92,26 +100,28 @@ docs/
 
 ## Key Statistics
 
-| Metric | Value |
-|--------|-------|
-| Total Tests | 162 ✅ |
-| New Tests | 52 |
-| Lines of Code (New) | ~1,200 |
-| Event Buffer Size | 100 events/session |
-| Session TTL | 1800 seconds (30 min) |
-| Max Connections/IP | 5 |
-| Max Sessions | 1000 |
-| Rate Limit | 1000 events/min/session |
-| Code Coverage | ~95% (Phase 2 components) |
+| Metric              | Value                     |
+| ------------------- | ------------------------- |
+| Total Tests         | 162 ✅                    |
+| New Tests           | 52                        |
+| Lines of Code (New) | ~1,200                    |
+| Event Buffer Size   | 100 events/session        |
+| Session TTL         | 1800 seconds (30 min)     |
+| Max Connections/IP  | 5                         |
+| Max Sessions        | 1000                      |
+| Rate Limit          | 1000 events/min/session   |
+| Code Coverage       | ~95% (Phase 2 components) |
 
 ## How to Use
 
 ### Start Server
+
 ```bash
 python -m interactive_chat.main --no-gradio
 ```
 
 ### Connect to WebSocket
+
 ```python
 import websocket
 import json
@@ -123,29 +133,34 @@ print(event)
 ```
 
 ### Check Limitations
+
 ```bash
 curl http://localhost:8000/api/limitations | python -m json.tool
 ```
 
 ### View API Docs
+
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
 
 ## Architecture Highlights
 
 ### Session Isolation
+
 - Each session gets unique UUID
 - Events isolated by session_id
 - No cross-session event leakage
 - IP-based rate limiting prevents abuse
 
 ### Event Delivery Guarantees
+
 - ✅ **Ordered**: Events delivered in timestamp order
 - ✅ **Deduped**: No duplicate delivery by message_id
 - ✅ **Buffered**: Last 100 events available on reconnect
 - ✅ **Real-time**: <100ms latency for live events
 
 ### Limitations Handled Gracefully
+
 - Engine not set → 503 on WebSocket connect
 - Invalid session_id → 4001 close code
 - IP rate limit → 4029 close code
@@ -154,6 +169,7 @@ curl http://localhost:8000/api/limitations | python -m json.tool
 ## Next Steps (Phase 3 Planning)
 
 ### Planned Features
+
 1. **Per-Session Engine Isolation** - Each session gets its own ConversationEngine
 2. **Database Persistence** - Session state → PostgreSQL, events → JSONL
 3. **Authentication** - JWT tokens, user accounts, multi-user support
@@ -162,6 +178,7 @@ curl http://localhost:8000/api/limitations | python -m json.tool
 6. **UI Framework** - Next.js/Gradio integration with real-time updates
 
 ### Estimated Effort
+
 - Phase 3: 20-30 hours (per-session engines + database)
 - Phase 4: 15-20 hours (UI/UX + monitoring)
 - Phase 5: 10-15 hours (advanced features)
@@ -169,14 +186,17 @@ curl http://localhost:8000/api/limitations | python -m json.tool
 ## Validation
 
 ### All Tests Pass ✅
+
 ```
 162 passed, 19 warnings in 7.29s
 ```
 
 ### No Regressions
+
 All 110 existing Phase 1 tests still passing with Phase 2 components in place.
 
 ### Performance Validated
+
 - Event buffer operations: ~0.5ms each
 - Session creation: <50ms
 - Connection establishment: <200ms
@@ -197,7 +217,7 @@ All 110 existing Phase 1 tests still passing with Phase 2 components in place.
 ✅ **Rate Limiting**: IP and per-session rate limits  
 ✅ **Documentation**: `/api/limitations` endpoint + comprehensive docs  
 ✅ **Testing**: 52 new tests (contract + integration), 100% passing  
-✅ **Backward Compatible**: All Phase 1 endpoints unchanged  
+✅ **Backward Compatible**: All Phase 1 endpoints unchanged
 
 ## Limitations (Documented)
 

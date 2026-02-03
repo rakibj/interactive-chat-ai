@@ -24,6 +24,7 @@ Phase 2 adds **real-time event streaming** via WebSocket with **session isolatio
 ### New Components
 
 #### 1. **Event Buffer** (`api/event_buffer.py`)
+
 Ring buffer storing last 100 events per session for catch-up on reconnect.
 
 ```python
@@ -35,6 +36,7 @@ events = buf.get_events()  # All events or filtered by timestamp
 ```
 
 **Methods**:
+
 - `add_event(event) -> bool`: Add event, return False if duplicate
 - `get_events(since_timestamp=None) -> List[WSEventMessage]`: Get events
 - `get_events_by_message_id(last_received_id) -> List`: Catch-up from message_id
@@ -43,6 +45,7 @@ events = buf.get_events()  # All events or filtered by timestamp
 - `to_json() -> str`: Export for logging
 
 #### 2. **Session Manager** (`api/session_manager.py`)
+
 Manages session lifecycle, connection tracking, and IP rate limiting.
 
 ```python
@@ -76,6 +79,7 @@ stats = mgr.get_stats()  # {"total_sessions": 5, "active_connections": 8, ...}
 ```
 
 **Key Limits**:
+
 - `SESSION_TTL_SECONDS = 1800` (30 minutes)
 - `MAX_SESSIONS = 1000`
 - `MAX_CONNECTIONS_PER_IP = 5`
@@ -83,6 +87,7 @@ stats = mgr.get_stats()  # {"total_sessions": 5, "active_connections": 8, ...}
 #### 3. **Pydantic Models** (`api/models.py`)
 
 **SessionState** (Constants):
+
 ```python
 SessionState.INITIALIZING  # Just created
 SessionState.ACTIVE        # Running conversation
@@ -92,6 +97,7 @@ SessionState.ERROR         # Error state
 ```
 
 **SessionInfo**:
+
 ```python
 SessionInfo(
     session_id="550e8400-e29b-41d4-a716-446655440000",
@@ -104,6 +110,7 @@ SessionInfo(
 ```
 
 **WSEventMessage** (All WebSocket messages from server):
+
 ```python
 WSEventMessage(
     message_id="msg_abc123de",  # For deduplication
@@ -116,6 +123,7 @@ WSEventMessage(
 ```
 
 **WSConnectionRequest** (Client→Server connection message):
+
 ```python
 WSConnectionRequest(
     session_id="550e8400...",  # Resume session (optional)
@@ -125,6 +133,7 @@ WSConnectionRequest(
 ```
 
 **APILimitation** (New endpoint response):
+
 ```python
 APILimitation(
     limitation="Single user only - engine breaks with 2+ concurrent users",
@@ -162,47 +171,51 @@ Client                          Server
 **URL**: `ws://localhost:8000/ws`
 
 **First Message** (client sends):
+
 ```json
 {
-    "session_id": "550e8400-e29b-41d4-a716-446655440000",  // optional (resume)
-    "phase_profile": "default",                             // optional
-    "user_agent": "Mozilla/5.0..."                         // optional
+  "session_id": "550e8400-e29b-41d4-a716-446655440000", // optional (resume)
+  "phase_profile": "default", // optional
+  "user_agent": "Mozilla/5.0..." // optional
 }
 ```
 
 **Server Response** (session created):
+
 ```json
 {
-    "message_id": "msg_abc123de",
-    "event_type": "session_created",
-    "timestamp": 1707052800.123,
-    "payload": {
-        "session_id": "550e8400-e29b-41d4-a716-446655440000",
-        "created_at": 1707052800.123,
-        "state": "initializing"
-    },
-    "phase_id": null,
-    "turn_id": null
+  "message_id": "msg_abc123de",
+  "event_type": "session_created",
+  "timestamp": 1707052800.123,
+  "payload": {
+    "session_id": "550e8400-e29b-41d4-a716-446655440000",
+    "created_at": 1707052800.123,
+    "state": "initializing"
+  },
+  "phase_id": null,
+  "turn_id": null
 }
 ```
 
 **Live Events** (streamed continuously):
+
 ```json
 {
-    "message_id": "msg_def456gh",
-    "event_type": "signal",
-    "timestamp": 1707052805.456,
-    "payload": {
-        "event_name": "vad.speech_started",
-        "duration": 0.5,
-        "confidence": 0.95
-    },
-    "phase_id": "part1",
-    "turn_id": 5
+  "message_id": "msg_def456gh",
+  "event_type": "signal",
+  "timestamp": 1707052805.456,
+  "payload": {
+    "event_name": "vad.speech_started",
+    "duration": 0.5,
+    "confidence": 0.95
+  },
+  "phase_id": "part1",
+  "turn_id": 5
 }
 ```
 
 **Close Codes**:
+
 - `4001`: Invalid session_id (resume failed)
 - `4029`: Too many connections from IP
 - `4503`: Engine not initialized
@@ -213,6 +226,7 @@ Client                          Server
 **Request**: `GET /api/limitations`
 
 **Response**: `200 OK`
+
 ```json
 [
     {
@@ -236,6 +250,7 @@ Client                          Server
 ### Test Coverage Breakdown
 
 **WebSocket Contract Tests** (`test_websocket_streaming.py`):
+
 - TestWebSocketConnections (3 tests): Connection lifecycle, session creation, validation
 - TestEventStreaming (5 tests): VAD/TTS/phase events, multiple clients, ordering
 - TestEventBuffering (3 tests): Buffer storage, catch-up, deduplication
@@ -246,6 +261,7 @@ Client                          Server
 - Additional tests: Protocol, lifecycle, concurrency, performance, client specs
 
 **Integration Tests** (`test_phase2_integration.py`):
+
 - TestLimitationsEndpoint (4 tests): Response format, required fields, documentation
 - TestWebSocketEndpointIntegration (3 tests): Endpoint existence, engine requirement
 - TestSessionLifecycleIntegration (3 tests): Create/retrieve, state transitions, TTL
@@ -310,14 +326,17 @@ Add 7: [3, 4, 5, 6, 7]      <-- 2 dropped
 ### Rate Limiting
 
 **Connection Rate Limit** (per IP):
+
 - Max 5 concurrent WebSocket connections
 - New connection from IP with 5+ active sessions → 4029 close code
 
 **Event Rate Limit** (per session):
+
 - Max 1000 events per minute
 - Excess events dropped with `rate_limit_exceeded` notification
 
 **Session TTL**:
+
 - 30 minutes of inactivity = automatic cleanup
 - `last_activity` updated on every message received
 - Cleanup job runs periodically (background task in Phase 3)
@@ -327,43 +346,48 @@ Add 7: [3, 4, 5, 6, 7]      <-- 2 dropped
 ### Client Changes
 
 **Phase 1 (REST Polling)**:
+
 ```javascript
 setInterval(async () => {
-    const state = await fetch('/api/state').then(r => r.json());
-    updateUI(state);
+  const state = await fetch("/api/state").then((r) => r.json());
+  updateUI(state);
 }, 1000);
 ```
 
 **Phase 2 (WebSocket Streaming)**:
+
 ```javascript
-const ws = new WebSocket('ws://localhost:8000/ws');
+const ws = new WebSocket("ws://localhost:8000/ws");
 
 ws.onopen = () => {
-    // Optionally resume session
-    ws.send(JSON.stringify({
-        session_id: savedSessionId,  // from localStorage
-        phase_profile: 'default'
-    }));
+  // Optionally resume session
+  ws.send(
+    JSON.stringify({
+      session_id: savedSessionId, // from localStorage
+      phase_profile: "default",
+    }),
+  );
 };
 
 ws.onmessage = (e) => {
-    const msg = JSON.parse(e.data);
-    if (msg.event_type === 'session_created') {
-        localStorage.setItem('session_id', msg.payload.session_id);
-    } else if (msg.event_type === 'signal') {
-        updateUI(msg.payload);
-    }
+  const msg = JSON.parse(e.data);
+  if (msg.event_type === "session_created") {
+    localStorage.setItem("session_id", msg.payload.session_id);
+  } else if (msg.event_type === "signal") {
+    updateUI(msg.payload);
+  }
 };
 
 ws.onclose = () => {
-    // Reconnect with saved session_id
-    setTimeout(() => connectWebSocket(), 3000);
+  // Reconnect with saved session_id
+  setTimeout(() => connectWebSocket(), 3000);
 };
 ```
 
 ### Server Changes
 
 **Phase 1**: REST endpoints return full state snapshots on demand
+
 ```python
 @app.get("/api/state")
 async def get_state():
@@ -371,6 +395,7 @@ async def get_state():
 ```
 
 **Phase 2**: Real-time streaming via WebSocket
+
 ```python
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -537,19 +562,19 @@ ws.close()
 Using JavaScript/Browser Console:
 
 ```javascript
-const ws = new WebSocket('ws://localhost:8000/ws');
+const ws = new WebSocket("ws://localhost:8000/ws");
 
 ws.onopen = () => {
-    ws.send(JSON.stringify({phase_profile: 'default'}));
+  ws.send(JSON.stringify({ phase_profile: "default" }));
 };
 
 ws.onmessage = (e) => {
-    const msg = JSON.parse(e.data);
-    console.log(msg);
+  const msg = JSON.parse(e.data);
+  console.log(msg);
 };
 
-ws.onerror = (e) => console.error('WebSocket error:', e);
-ws.onclose = () => console.log('WebSocket closed');
+ws.onerror = (e) => console.error("WebSocket error:", e);
+ws.onclose = () => console.log("WebSocket closed");
 ```
 
 ### Check API Limitations
@@ -577,11 +602,13 @@ Both include WebSocket endpoint documentation and example payloads.
 **Phase 2 is production-ready for single-user demos with real-time event streaming.** The WebSocket layer supports multiple concurrent sessions with proper isolation, but the underlying ConversationEngine remains single-user. Phase 3 will add per-session engine isolation and database persistence for true multi-user support.
 
 **Current Limitations**:
+
 - Single engine shared across sessions (reload page workaround)
 - No persistence (logs only)
 - No authentication
 
 **Guarantees**:
+
 - ✅ Event deduplication by message_id
 - ✅ Event ordering preserved
 - ✅ Session isolation (no event leakage)

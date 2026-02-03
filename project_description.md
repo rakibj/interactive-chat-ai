@@ -1097,6 +1097,7 @@ acknowledgments=["Okay.", "Noted.", "Got it."]
 - `WebSocket Endpoint` - Full duplex real-time streaming with heartbeats
 
 **Phase 2 Test Coverage**: ✅ 52 new tests (26 contract + 26 integration)
+
 - Contract tests: WebSocket protocol, event streaming, session management
 - Integration tests: Endpoint behavior, session lifecycle, rate limiting, API contracts
 
@@ -1185,12 +1186,14 @@ app.add_middleware(
 ### Quick API Start
 
 **Start Server**:
+
 ```bash
 python -m interactive_chat.main --no-gradio
 # Server runs at http://localhost:8000
 ```
 
 **REST Endpoints**:
+
 ```bash
 curl http://localhost:8000/api/health
 curl http://localhost:8000/api/state
@@ -1198,6 +1201,7 @@ curl http://localhost:8000/api/limitations
 ```
 
 **WebSocket Connection**:
+
 ```python
 import websocket
 ws = websocket.create_connection("ws://localhost:8000/ws")
@@ -1207,6 +1211,7 @@ print(event)
 ```
 
 **API Documentation**:
+
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
 - Limitations: GET /api/limitations
