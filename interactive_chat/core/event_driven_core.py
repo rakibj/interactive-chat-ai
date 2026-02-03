@@ -14,6 +14,7 @@ class EventType(Enum):
     AI_SPEECH_FINISHED = "AI_SPEECH_FINISHED"
     TICK = "TICK"
     RESET_TURN = "RESET_TURN"
+    PHASE_TRANSITION = "PHASE_TRANSITION"  # Request phase transition
 
 class ActionType(Enum):
     """Enumeration of all side-effect actions."""
@@ -23,6 +24,7 @@ class ActionType(Enum):
     PLAY_ACK = "PLAY_ACK"
     SPEAK_SENTENCE = "SPEAK_SENTENCE"
     LOG_TURN = "LOG_TURN"  # Analytics logging
+    TRANSITION_PHASE = "TRANSITION_PHASE"  # Execute phase transition
 
 @dataclass(frozen=True)
 class Event:
@@ -63,6 +65,10 @@ class SystemState:
     safety_timeout_ms: int = 2500
     interruption_sensitivity: float = 0.5
     human_speaking_limit_sec: Optional[int] = None
+    
+    # Phase Management (for PhaseProfile support)
+    current_phase_id: Optional[str] = None  # Current phase in PhaseProfile (None if standalone)
+    phase_profile_name: Optional[str] = None  # Active PhaseProfile name (None if standalone)
     
     # Logic State
     human_speaking_limit_ack_sent: bool = False
@@ -234,6 +240,20 @@ class Reducer:
             state.turn_total_latency_ms = 0.0
             state.turn_confidence_score = 1.0
             state.turn_id += 1
+            
+        elif event.type == EventType.PHASE_TRANSITION:
+            # Handle phase transition request
+            next_phase = event.payload.get("next_phase")
+            if next_phase:
+                state.current_phase_id = next_phase
+                actions.append(Action(
+                    ActionType.TRANSITION_PHASE,
+                    {"next_phase": next_phase}
+                ))
+                actions.append(Action(
+                    ActionType.LOG,
+                    {"message": f"🔀 Phase transition to: {next_phase}"}
+                ))
             
         elif event.type == EventType.TICK:
             # TICK events fall through to state machine logic below for timeout-driven transitions

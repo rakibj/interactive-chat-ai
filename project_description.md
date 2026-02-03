@@ -7,6 +7,7 @@ A real-time voice conversation system with configurable AI personas, advanced in
 **Key Features**:
 
 - Event-driven architecture with deterministic state machine reducer
+- **Phased AI system with signal-driven transitions** (NEW)
 - Decoupled signals layer for optional plugin/dashboard integration without core modification
 - Multi-authority modes (human, AI, default) with profile-based turn-taking
 - Human speaking limit enforcement for controlled conversation dynamics
@@ -187,7 +188,89 @@ SystemState now tracks per-turn metrics for automatic analytics logging:
 
 **Backward Compatibility**: 100% - All signals are optional. Core functions identically with zero listeners registered.
 
-### 2. AudioManager (`core/audio_manager.py`)
+### 4. Phased AI System (NEW - `config.py` + `main.py`)
+
+**Purpose**: Multi-phase conversations with deterministic, signal-driven transitions between stages.
+
+**Key Insight**: Use signals not just for observability, but also to orchestrate conversation flow. The AI can emit signals that trigger automatic phase transitions, enabling complex multi-stage interactions (exams, sales calls, tutorials) without hardcoded logic.
+
+**Components**:
+
+**PhaseProfile** - Container for multi-phase conversations:
+
+- Contains multiple InstructionProfiles (one per phase)
+- Defines transitions between phases based on signals
+- Provides global and per-phase context
+- Supports linear, branching, and loop-back flows
+
+**PhaseTransition** - Defines when to move between phases:
+
+- `from_phase`: Source phase ID
+- `to_phase`: Destination phase ID
+- `trigger_signals`: List of signals that trigger transition
+- `require_all`: If True, all signals must be emitted; if False, any one triggers
+
+**Use Cases**:
+
+- **IELTS Exam**: greeting → part1 → part2 → part3 → closing (5 phases, linear)
+- **Sales Call**: opening → discovery → pitch ⟷ objection_handling → close (5 phases, branching + loop-back)
+- **Tutorial**: intro → lesson → practice → assessment → conclusion (multi-stage learning)
+- **Support**: intake → diagnosis → solution → verification → closing (structured troubleshooting)
+
+**Flow Example** (IELTS):
+
+```
+1. greeting phase (AI starts)
+   - AI: "Good morning, may I see your ID?"
+   - AI emits: custom.exam.greeting_complete
+   ↓ TRANSITION
+2. part1 phase
+   - AI asks 4-5 personal questions
+   - AI emits: custom.exam.questions_completed
+   ↓ TRANSITION
+3. part2 phase
+   - AI gives topic card, candidate speaks 1-2 minutes
+   - AI emits: custom.exam.monologue_complete
+   ↓ TRANSITION
+4. part3 phase
+   - AI asks abstract discussion questions
+   - AI emits: custom.exam.discussion_complete
+   ↓ TRANSITION
+5. closing phase
+   - AI: "That concludes the test. Thank you."
+```
+
+**How It Works**:
+
+1. System starts in `initial_phase`
+2. After each AI response, `_extract_signals()` parses `<signals></signals>` blocks
+3. `_check_phase_transitions()` checks if emitted signals match any transition rules
+4. If match found, `PHASE_TRANSITION` event emitted
+5. `_transition_to_phase()` executes:
+   - Loads new InstructionProfile
+   - Updates SystemState with new settings (authority, timeouts, etc.)
+   - Clears signal history for new phase
+   - Injects phase context into system prompt
+   - Generates AI greeting if new phase starts with AI
+
+**Context Injection**:
+When running a phase, system prompt is constructed as:
+
+```
+SYSTEM_PROMPT_BASE
++ Signal hints (what signals to emit)
++ === PHASE CONTEXT ===
++ Global context (applies to all phases)
++ Per-phase context (specific to this phase)
++ ===================
++ Profile instructions (phase-specific role)
+```
+
+**Backward Compatibility**: 100% - Standalone InstructionProfiles work unchanged. Set `ACTIVE_PHASE_PROFILE = None` to use single profile mode.
+
+**Documentation**: See `docs/PHASED_AI_GUIDE.md` for comprehensive guide, `docs/PHASED_AI_QUICK_REF.md` for quick reference.
+
+### 5. AudioManager (`core/audio_manager.py`)
 
 **Purpose**: Low-level audio I/O and speech detection.
 
@@ -203,7 +286,7 @@ SystemState now tracks per-turn metrics for automatic analytics logging:
 - Energy floor: 0.015 (RMS)
 - Frame size: 512 samples (32ms @ 16kHz)
 
-### 3. TurnTaker (`core/turn_taker.py`)
+### 6. TurnTaker (`core/turn_taker.py`)
 
 **Status**: ⚠️ **DEPRECATED** - Logic moved to Reducer.reduce() in event_driven_core.py
 
@@ -230,7 +313,7 @@ SystemState now tracks per-turn metrics for automatic analytics logging:
 
 **Migration Note**: This module is kept for backward compatibility but is no longer used. All state machine logic is now centralized in the event-driven core Reducer.
 
-### 4. InterruptionManager (`core/interruption_manager.py`)
+### 7. InterruptionManager (`core/interruption_manager.py`)
 
 **Status**: ⚠️ **DEPRECATED** - Logic moved to Reducer.\_check_interruption() in event_driven_core.py
 
@@ -258,7 +341,7 @@ SystemState now tracks per-turn metrics for automatic analytics logging:
 
 **Migration Note**: This module is kept for backward compatibility but is no longer used. All interruption logic is now centralized in the Reducer.
 
-### 5. ASR System (`interfaces/asr.py`)
+### 8. ASR System (`interfaces/asr.py`)
 
 **Two-Stage Architecture**:
 
@@ -283,7 +366,7 @@ SystemState now tracks per-turn metrics for automatic analytics logging:
 - Resampling: 16kHz → 16kHz (Vosk/Whisper native)
 - Format: float32 normalized [-1, 1]
 
-### 6. LLM System (`interfaces/llm.py`)
+### 9. LLM System (`interfaces/llm.py`)
 
 **Implementations**:
 
@@ -305,7 +388,7 @@ SystemState now tracks per-turn metrics for automatic analytics logging:
 - Sentence boundary detection (`.!?`)
 - Immediate TTS queueing for low latency
 
-### 7. TTS System (`interfaces/tts.py`)
+### 10. TTS System (`interfaces/tts.py`)
 
 **PocketTTS** (Primary):
 
@@ -330,7 +413,7 @@ for i in range(0, len(audio), chunk_size):
 - Windows System.Speech API
 - No interruption support (blocking call)
 
-### 8. Configuration System (`config.py`)
+### 11. Configuration System (`config.py`)
 
 **InstructionProfile** (Pydantic Model):
 

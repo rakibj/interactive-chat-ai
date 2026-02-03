@@ -33,7 +33,10 @@ sys.path.insert(0, str(os.path.dirname(__file__)))
 from config import (
     CONFIDENCE_THRESHOLD,
     ACTIVE_PROFILE,
+    ACTIVE_PHASE_PROFILE,
+    PHASE_PROFILES,
     get_system_prompt,
+    get_system_prompt_with_phase_context,
     get_profile_settings,
     PROJECT_ROOT,
 )
@@ -78,8 +81,27 @@ class ConversationEngine:
     """Main orchestration engine based on Event-Driven Core."""
     
     def __init__(self):
-        # Load profile settings
-        self.profile_settings = get_profile_settings(ACTIVE_PROFILE)
+        # Determine if using PhaseProfile or standalone InstructionProfile
+        self.active_phase_profile = None
+        self.phase_emitted_signals = []  # Track signals for phase transitions
+        
+        if ACTIVE_PHASE_PROFILE and ACTIVE_PHASE_PROFILE in PHASE_PROFILES:
+            # Using PhaseProfile mode
+            self.active_phase_profile = PHASE_PROFILES[ACTIVE_PHASE_PROFILE]
+            current_phase_id = self.active_phase_profile.initial_phase
+            current_profile = self.active_phase_profile.get_phase(current_phase_id)
+            
+            if not current_profile:
+                raise ValueError(f"Invalid initial phase: {current_phase_id}")
+            
+            print(f"🎭 Starting PhaseProfile: {self.active_phase_profile.name}")
+            print(f"🔀 Initial phase: {current_profile.name}")
+            
+            self.profile_settings = get_profile_settings(None, current_profile)
+        else:
+            # Using standalone InstructionProfile mode
+            self.profile_settings = get_profile_settings(ACTIVE_PROFILE)
+            current_phase_id = None
         
         self.audio_manager = AudioManager()
         self.conversation_memory = ConversationMemory()
@@ -91,7 +113,9 @@ class ConversationEngine:
             end_ms=self.profile_settings["end_ms"],
             safety_timeout_ms=self.profile_settings["safety_timeout_ms"],
             interruption_sensitivity=self.profile_settings["interruption_sensitivity"],
-            human_speaking_limit_sec=self.profile_settings.get("human_speaking_limit_sec")
+            human_speaking_limit_sec=self.profile_settings.get("human_speaking_limit_sec"),
+            current_phase_id=current_phase_id,
+            phase_profile_name=self.active_phase_profile.name if self.active_phase_profile else None,
         )
         
         # Event Queue
@@ -273,13 +297,87 @@ class ConversationEngine:
             # Log to analytics system
             self.session_analytics.log_turn(turn_analytics)
             print(f"📊 Turn #{payload.get('turn_id', 0)} logged to analytics")
+        
+        elif action.type == ActionType.TRANSITION_PHASE:
+            # Execute phase transition (only if using PhaseProfile)
+            if self.active_phase_profile:
+                next_phase_id = action.payload.get("next_phase")
+                self._transition_to_phase(next_phase_id)
+    
+    def _transition_to_phase(self, next_phase_id: str) -> None:
+        """Transition to a new phase in the PhaseProfile."""
+        if not self.active_phase_profile:
+            return
+        
+        next_profile = self.active_phase_profile.get_phase(next_phase_id)
+        if not next_profile:
+            print(f"⚠️ Warning: Phase '{next_phase_id}' not found")
+            return
+        
+        # Update profile settings
+        self.profile_settings = get_profile_settings(None, next_profile)
+        
+        # Update state with new profile settings
+        self.state.authority = self.profile_settings.get("authority", "human")
+        self.state.pause_ms = self.profile_settings["pause_ms"]
+        self.state.end_ms = self.profile_settings["end_ms"]
+        self.state.safety_timeout_ms = self.profile_settings["safety_timeout_ms"]
+        self.state.interruption_sensitivity = self.profile_settings["interruption_sensitivity"]
+        self.state.human_speaking_limit_sec = self.profile_settings.get("human_speaking_limit_sec")
+        self.state.current_phase_id = next_phase_id
+        
+        # Clear phase signals for new phase
+        self.phase_emitted_signals.clear()
+        
+        print(f"✅ Transitioned to phase: {next_profile.name}")
+        
+        # If new phase starts with AI, generate greeting
+        if next_profile.start == "ai":
+            time.sleep(0.5)  # Brief pause between phases
+            self._generate_ai_turn()
+    
+    def _check_phase_transitions(self, emitted_signals: List[str]) -> None:
+        """Check if any signals trigger a phase transition."""
+        if not self.active_phase_profile or not self.state.current_phase_id:
+            return
+        
+        # Add newly emitted signals to the list
+        for sig in emitted_signals:
+            if sig not in self.phase_emitted_signals:
+                self.phase_emitted_signals.append(sig)
+        
+        # Check if we should transition
+        next_phase = self.active_phase_profile.find_transition(
+            self.state.current_phase_id,
+            self.phase_emitted_signals
+        )
+        
+        if next_phase:
+            # Emit phase transition event
+            self.event_queue.put(Event(
+                EventType.PHASE_TRANSITION,
+                time.time(),
+                "phase_manager",
+                {"next_phase": next_phase}
+            ))
+    
+    def _get_current_system_prompt(self) -> str:
+        """Get system prompt for current profile/phase."""
+        if self.active_phase_profile and self.state.current_phase_id:
+            # PhaseProfile mode: Include phase context
+            current_profile = self.active_phase_profile.get_phase(self.state.current_phase_id)
+            phase_context = self.active_phase_profile.get_phase_context(self.state.current_phase_id)
+            return get_system_prompt_with_phase_context(current_profile, phase_context)
+        else:
+            # Standalone mode
+            return get_system_prompt(ACTIVE_PROFILE)
 
     def _generate_ai_turn(self) -> None:
         """Generate an AI turn without waiting for user input (for greetings, etc)."""
         try:
             # LLM Stream with timing
             llm_start = time.time()
-            messages = [{"role": "system", "content": get_system_prompt(ACTIVE_PROFILE)}] + self.conversation_memory.get_messages()
+            messages = [{"role": "system", "content": self._get_current_system_prompt()}] + self.conversation_memory.get_messages()
             full_response = ""
             signals_started = False
             current_sentence = ""
@@ -323,11 +421,32 @@ class ConversationEngine:
             import re
             clean_response = re.sub(r"<signals>\s*\{.*?\}\s*</signals>", "", full_response, flags=re.DOTALL).strip()
             
+            # Extract emitted signals for phase transitions
+            emitted_signals = self._extract_signals(full_response)
+            self._check_phase_transitions(emitted_signals)
+            
             if clean_response:
                 self.conversation_memory.add_message("assistant", clean_response)
                 
         except Exception as e:
             print(f"❌ Error in AI turn generation: {e}")
+    
+    def _extract_signals(self, response_text: str) -> List[str]:
+        """Extract signal names from LLM response."""
+        import re
+        import json
+        
+        signal_names = []
+        signal_matches = re.findall(r"<signals>\s*(\{.*?\})\s*</signals>", response_text, flags=re.DOTALL)
+        
+        for match in signal_matches:
+            try:
+                signals_dict = json.loads(match)
+                signal_names.extend(signals_dict.keys())
+            except json.JSONDecodeError:
+                pass  # Silently ignore malformed signal blocks
+        
+        return signal_names
 
     def _process_turn_async(self, audio_frames: List, reason: str) -> None:
         """Heavy lifting for turn processing (ASR -> LLM -> TTS)."""
@@ -356,7 +475,7 @@ class ConversationEngine:
             
             # LLM Stream with timing
             llm_start = time.time()
-            messages = [{"role": "system", "content": get_system_prompt(ACTIVE_PROFILE)}] + self.conversation_memory.get_messages()
+            messages = [{"role": "system", "content": self._get_current_system_prompt()}] + self.conversation_memory.get_messages()
             full_response = ""
             signals_started = False
             current_sentence = ""
@@ -400,6 +519,10 @@ class ConversationEngine:
             # Strip signal blocks from full response for memory storage
             import re
             clean_response = re.sub(r"<signals>\s*\{.*?\}\s*</signals>", "", full_response, flags=re.DOTALL).strip()
+            
+            # Extract emitted signals for phase transitions
+            emitted_signals = self._extract_signals(full_response)
+            self._check_phase_transitions(emitted_signals)
             
             if clean_response:
                 self.conversation_memory.add_message("assistant", clean_response)

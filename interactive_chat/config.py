@@ -68,7 +68,11 @@ MAX_MEMORY_TURNS = 24
 
 
 class InstructionProfile(BaseModel):
-    """Pydantic model for instruction profile configuration."""
+    """Pydantic model for instruction profile configuration.
+    
+    Can be used standalone or as part of a PhaseProfile.
+    When part of a PhaseProfile, additional context will be injected.
+    """
     name: str
     start: str
     voice: str
@@ -88,9 +92,83 @@ class InstructionProfile(BaseModel):
         frozen = True  # Make instances immutable
 
 
+class PhaseTransition(BaseModel):
+    """Defines a transition between two phases based on signal triggers.
+    
+    Transitions are checked after each turn when signals are emitted.
+    """
+    from_phase: str  # Phase ID to transition from
+    to_phase: str    # Phase ID to transition to
+    trigger_signals: List[str]  # Signal names that can trigger this transition
+    require_all: bool = False   # If True, all signals must be received; if False, any one triggers
+    
+    class Config:
+        frozen = True
+
+
+class PhaseProfile(BaseModel):
+    """Container for multi-phase conversations with deterministic transitions.
+    
+    PhaseProfiles orchestrate multiple InstructionProfiles, passing additional
+    context to each phase and defining signal-based transitions between them.
+    
+    Example use cases:
+    - IELTS exam (greeting → part1 → part2 → part3 → closing)
+    - Sales call (opening → discovery → pitch → objection handling → close)
+    - Customer support (intake → diagnosis → solution → verification → farewell)
+    """
+    name: str                                        # Display name for the phase profile
+    phases: dict[str, InstructionProfile]            # phase_id -> InstructionProfile mapping
+    transitions: List[PhaseTransition]               # Ordered list of possible transitions
+    initial_phase: str                               # Starting phase ID
+    phase_context: Optional[str] = None              # Global context for all phases
+    per_phase_context: Optional[dict[str, str]] = None  # Phase-specific additional context
+    
+    class Config:
+        frozen = True
+    
+    def get_phase(self, phase_id: str) -> Optional[InstructionProfile]:
+        """Get an InstructionProfile by phase ID."""
+        return self.phases.get(phase_id)
+    
+    def get_phase_context(self, phase_id: str) -> str:
+        """Get the full context for a specific phase (global + phase-specific)."""
+        context_parts = []
+        
+        if self.phase_context:
+            context_parts.append(self.phase_context)
+        
+        if self.per_phase_context and phase_id in self.per_phase_context:
+            context_parts.append(self.per_phase_context[phase_id])
+        
+        return "\n\n".join(context_parts) if context_parts else ""
+    
+    def find_transition(self, current_phase: str, emitted_signals: List[str]) -> Optional[str]:
+        """Find the next phase based on current phase and emitted signals.
+        
+        Returns the next phase_id if a transition is triggered, None otherwise.
+        """
+        for transition in self.transitions:
+            if transition.from_phase != current_phase:
+                continue
+            
+            if transition.require_all:
+                # All signals must be present
+                if all(sig in emitted_signals for sig in transition.trigger_signals):
+                    return transition.to_phase
+            else:
+                # Any one signal triggers
+                if any(sig in emitted_signals for sig in transition.trigger_signals):
+                    return transition.to_phase
+        
+        return None
+
+
 # Conversation Configuration
 CONVERSATION_START = "human"  # Options: "human" or "ai" (can be overridden per profile)
 ACTIVE_PROFILE = "negotiator"  # Select which profile to use
+ACTIVE_PHASE_PROFILE: Optional[str] = None  # If set, use a PhaseProfile instead of single profile
+ACTIVE_PHASE_PROFILE = "ielts_full_exam"  # Example: set to "ielts_full_exam" to use that profile
 
 # Default LLM Parameters (can be overridden per profile)
 LLM_MAX_TOKENS = 80
@@ -475,22 +553,406 @@ TONE: Warm, engaged, genuinely interested.""",
 }
 
 
-def get_profile_settings(profile_key: str = None) -> dict:
+# ============================================================================
+# PHASE PROFILES - Multi-phase conversations with deterministic transitions
+# ============================================================================
+
+PHASE_PROFILES = {
+    "ielts_full_exam": PhaseProfile(
+        name="IELTS Speaking Test (Full)",
+        initial_phase="greeting",
+        phase_context="""CONTEXT: This is a full IELTS Speaking test simulation.
+The test consists of three parts with specific timing and structure.
+Maintain professional examiner demeanor throughout all phases.
+Track time informally and transition when appropriate signals are detected.""",
+        
+        phases={
+            "greeting": InstructionProfile(
+                name="IELTS - Greeting",
+                start="ai",
+                voice="jean",
+                max_tokens=60,
+                temperature=0.5,
+                pause_ms=800,
+                end_ms=1500,
+                safety_timeout_ms=3500,
+                interruption_sensitivity=0.3,
+                authority="ai",
+                human_speaking_limit_sec=30,
+                acknowledgments=["Thank you.", "Good.", "Right."],
+                signals={
+                    "exam.greeting_complete": "Examiner has completed greeting and ID verification.",
+                },
+                instructions="""You are starting the IELTS Speaking test.
+
+TASKS:
+1. Greet the candidate warmly but professionally.
+2. Ask for their full name.
+3. Ask to see their ID (acknowledge they showed it).
+4. Briefly explain we'll start with Part 1.
+
+Keep it concise. After completing these steps, emit the greeting_complete signal."""
+            ),
+            
+            "part1": InstructionProfile(
+                name="IELTS - Part 1",
+                start="ai",
+                voice="jean",
+                max_tokens=120,
+                temperature=0.6,
+                pause_ms=800,
+                end_ms=1500,
+                safety_timeout_ms=3500,
+                interruption_sensitivity=0.3,
+                authority="ai",
+                human_speaking_limit_sec=45,
+                acknowledgments=["Thank you.", "Good.", "I see.", "Excellent."],
+                signals={
+                    "exam.questions_completed": "Asked 4-5 questions, ready to transition to Part 2.",
+                },
+                instructions="""You are conducting IELTS Speaking Part 1 (4-5 minutes).
+
+TOPICS: Home, family, work, studies, hobbies, daily life, interests.
+
+BEHAVIOR:
+- Ask 4-5 short personal questions.
+- Questions should be simple and about familiar topics.
+- After 4-5 questions, emit questions_completed signal.
+- Listen attentively, acknowledge briefly.
+- Move through questions at a steady pace."""
+            ),
+            
+            "part2": InstructionProfile(
+                name="IELTS - Part 2",
+                start="ai",
+                voice="jean",
+                max_tokens=150,
+                temperature=0.6,
+                pause_ms=1000,
+                end_ms=2000,
+                safety_timeout_ms=4000,
+                interruption_sensitivity=0.2,
+                authority="ai",
+                human_speaking_limit_sec=120,
+                acknowledgments=["Thank you.", "Time's up."],
+                signals={
+                    "exam.topic_given": "Topic card has been presented.",
+                    "exam.monologue_complete": "Candidate finished 1-2 minute monologue.",
+                },
+                instructions="""You are conducting IELTS Speaking Part 2 (3-4 minutes).
+
+STRUCTURE:
+1. Give a topic card (describe a memorable event, person, place, object).
+2. Tell candidate they have 1 minute to prepare (simulate).
+3. Ask them to speak for 1-2 minutes.
+4. After their monologue, ask 1-2 follow-up questions.
+5. When complete, emit monologue_complete signal.
+
+SAMPLE TOPIC: "Describe a memorable trip you took. You should say: where you went, who you went with, what you did, and explain why it was memorable."
+
+Be patient during the monologue. Let them speak fully."""
+            ),
+            
+            "part3": InstructionProfile(
+                name="IELTS - Part 3",
+                start="ai",
+                voice="jean",
+                max_tokens=120,
+                temperature=0.7,
+                pause_ms=800,
+                end_ms=1500,
+                safety_timeout_ms=3500,
+                interruption_sensitivity=0.3,
+                authority="ai",
+                human_speaking_limit_sec=60,
+                acknowledgments=["Thank you.", "Interesting.", "I see."],
+                signals={
+                    "exam.discussion_complete": "Abstract discussion complete, ready to close.",
+                },
+                instructions="""You are conducting IELTS Speaking Part 3 (4-5 minutes).
+
+FOCUS: Abstract discussion related to Part 2 topic.
+
+BEHAVIOR:
+- Ask 3-4 deeper, more abstract questions.
+- Topics: society, culture, future trends, opinions.
+- Encourage detailed responses.
+- Questions should require analysis, comparison, speculation.
+- After 3-4 exchanges, emit discussion_complete signal.
+
+SAMPLE QUESTIONS:
+- How has travel changed in recent years?
+- What are the benefits and drawbacks of tourism?
+- Do you think people will travel more or less in the future?"""
+            ),
+            
+            "closing": InstructionProfile(
+                name="IELTS - Closing",
+                start="ai",
+                voice="jean",
+                max_tokens=60,
+                temperature=0.5,
+                pause_ms=800,
+                end_ms=1500,
+                safety_timeout_ms=3000,
+                interruption_sensitivity=0.3,
+                authority="ai",
+                human_speaking_limit_sec=20,
+                acknowledgments=["Thank you.", "Goodbye."],
+                signals={
+                    "exam.test_complete": "Test has concluded.",
+                },
+                instructions="""You are concluding the IELTS Speaking test.
+
+TASKS:
+1. Thank the candidate for their time.
+2. Inform them the test is complete.
+3. Wish them good luck.
+
+Keep it brief and professional. Emit test_complete signal when done."""
+            ),
+        },
+        
+        per_phase_context={
+            "greeting": "This is the introduction phase. Be warm but efficient.",
+            "part1": "This is Part 1 (Introduction and Interview). Keep questions simple and personal.",
+            "part2": "This is Part 2 (Long Turn). Give them space to speak for 1-2 minutes uninterrupted.",
+            "part3": "This is Part 3 (Two-way Discussion). Ask thought-provoking, abstract questions.",
+            "closing": "This is the conclusion. Be brief and professional.",
+        },
+        
+        transitions=[
+            PhaseTransition(
+                from_phase="greeting",
+                to_phase="part1",
+                trigger_signals=["custom.exam.greeting_complete"],
+                require_all=False
+            ),
+            PhaseTransition(
+                from_phase="part1",
+                to_phase="part2",
+                trigger_signals=["custom.exam.questions_completed"],
+                require_all=False
+            ),
+            PhaseTransition(
+                from_phase="part2",
+                to_phase="part3",
+                trigger_signals=["custom.exam.monologue_complete"],
+                require_all=False
+            ),
+            PhaseTransition(
+                from_phase="part3",
+                to_phase="closing",
+                trigger_signals=["custom.exam.discussion_complete"],
+                require_all=False
+            ),
+        ],
+    ),
+    
+    "sales_call": PhaseProfile(
+        name="Sales Call (Discovery to Close)",
+        initial_phase="opening",
+        phase_context="""CONTEXT: This is a structured sales call.
+You are selling a B2B SaaS product (project management software).
+Your goal is to understand needs, present value, handle objections, and close.
+Transition through phases based on customer signals.""",
+        
+        phases={
+            "opening": InstructionProfile(
+                name="Sales - Opening",
+                start="ai",
+                voice="alba",
+                max_tokens=80,
+                temperature=0.6,
+                pause_ms=600,
+                end_ms=1200,
+                safety_timeout_ms=2500,
+                interruption_sensitivity=0.6,
+                authority="default",
+                signals={
+                    "sales.rapport_established": "Initial rapport built, ready for discovery.",
+                },
+                instructions="""You are opening a sales call.
+
+TASKS:
+1. Greet warmly and introduce yourself.
+2. Confirm they have time to talk (5-10 minutes).
+3. Set agenda briefly.
+4. Build quick rapport.
+
+After rapport established, emit rapport_established signal."""
+            ),
+            
+            "discovery": InstructionProfile(
+                name="Sales - Discovery",
+                start="ai",
+                voice="alba",
+                max_tokens=100,
+                temperature=0.6,
+                pause_ms=600,
+                end_ms=1200,
+                safety_timeout_ms=2500,
+                interruption_sensitivity=0.6,
+                authority="default",
+                signals={
+                    "sales.pain_points_identified": "Customer pain points identified.",
+                    "sales.needs_understood": "Customer needs are clear.",
+                },
+                instructions="""You are in discovery phase.
+
+TASKS:
+- Ask about current process/tools.
+- Identify pain points and challenges.
+- Understand their goals.
+- Listen actively and take mental notes.
+
+After understanding needs, emit needs_understood signal."""
+            ),
+            
+            "pitch": InstructionProfile(
+                name="Sales - Pitch",
+                start="ai",
+                voice="alba",
+                max_tokens=120,
+                temperature=0.6,
+                pause_ms=600,
+                end_ms=1200,
+                safety_timeout_ms=2500,
+                interruption_sensitivity=0.6,
+                authority="default",
+                signals={
+                    "sales.value_presented": "Value proposition presented.",
+                    "sales.objection_raised": "Customer raised objection or concern.",
+                },
+                instructions="""You are presenting your solution.
+
+TASKS:
+- Connect features to their pain points.
+- Focus on benefits, not just features.
+- Use their language and context.
+- Check for understanding.
+
+If objection raised, emit objection_raised signal to move to objection handling.
+Otherwise, emit value_presented when done."""
+            ),
+            
+            "objection_handling": InstructionProfile(
+                name="Sales - Objection Handling",
+                start="human",
+                voice="alba",
+                max_tokens=100,
+                temperature=0.7,
+                pause_ms=600,
+                end_ms=1200,
+                safety_timeout_ms=2500,
+                interruption_sensitivity=0.6,
+                authority="default",
+                signals={
+                    "sales.objection_resolved": "Objection addressed satisfactorily.",
+                    "sales.needs_more_info": "Customer needs more information.",
+                },
+                instructions="""You are handling objections.
+
+BEHAVIOR:
+- Listen fully to the concern.
+- Validate their concern.
+- Address with data, stories, or guarantees.
+- Check if resolved.
+
+Emit objection_resolved when satisfied, or needs_more_info if they want details."""
+            ),
+            
+            "close": InstructionProfile(
+                name="Sales - Close",
+                start="ai",
+                voice="alba",
+                max_tokens=80,
+                temperature=0.6,
+                pause_ms=600,
+                end_ms=1200,
+                safety_timeout_ms=2500,
+                interruption_sensitivity=0.6,
+                authority="default",
+                signals={
+                    "sales.deal_closed": "Customer agreed to next steps.",
+                    "sales.follow_up_scheduled": "Follow-up meeting scheduled.",
+                },
+                instructions="""You are closing the call.
+
+TASKS:
+- Summarize value discussed.
+- Propose clear next steps (trial, demo, contract).
+- Create urgency if appropriate.
+- Schedule follow-up.
+
+Emit deal_closed or follow_up_scheduled when complete."""
+            ),
+        },
+        
+        transitions=[
+            PhaseTransition(
+                from_phase="opening",
+                to_phase="discovery",
+                trigger_signals=["custom.sales.rapport_established"],
+                require_all=False
+            ),
+            PhaseTransition(
+                from_phase="discovery",
+                to_phase="pitch",
+                trigger_signals=["custom.sales.needs_understood"],
+                require_all=False
+            ),
+            PhaseTransition(
+                from_phase="pitch",
+                to_phase="objection_handling",
+                trigger_signals=["custom.sales.objection_raised"],
+                require_all=False
+            ),
+            PhaseTransition(
+                from_phase="pitch",
+                to_phase="close",
+                trigger_signals=["custom.sales.value_presented"],
+                require_all=False
+            ),
+            PhaseTransition(
+                from_phase="objection_handling",
+                to_phase="pitch",
+                trigger_signals=["custom.sales.needs_more_info"],
+                require_all=False
+            ),
+            PhaseTransition(
+                from_phase="objection_handling",
+                to_phase="close",
+                trigger_signals=["custom.sales.objection_resolved"],
+                require_all=False
+            ),
+        ],
+    ),
+}
+
+
+def get_profile_settings(profile_key: str = None, profile_obj: InstructionProfile = None) -> dict:
     """
     Get all settings for a profile.
     
     Args:
-        profile_key: Profile name. Uses ACTIVE_PROFILE if None.
+        profile_key: Profile name from INSTRUCTION_PROFILES. Uses ACTIVE_PROFILE if None.
+        profile_obj: Direct InstructionProfile object (used for PhaseProfile phases).
     
     Returns:
         Dictionary with all profile settings.
     """
-    profile_key = profile_key or ACTIVE_PROFILE
-    
-    if profile_key not in INSTRUCTION_PROFILES:
-        raise ValueError(f"Unknown profile: {profile_key}. Available: {list(INSTRUCTION_PROFILES.keys())}")
-    
-    profile: InstructionProfile = INSTRUCTION_PROFILES[profile_key]
+    if profile_obj:
+        # Direct profile object provided (from PhaseProfile)
+        profile = profile_obj
+    else:
+        # Load from INSTRUCTION_PROFILES
+        profile_key = profile_key or ACTIVE_PROFILE
+        
+        if profile_key not in INSTRUCTION_PROFILES:
+            raise ValueError(f"Unknown profile: {profile_key}. Available: {list(INSTRUCTION_PROFILES.keys())}")
+        
+        profile: InstructionProfile = INSTRUCTION_PROFILES[profile_key]
     
     return {
         "name": profile.name,
@@ -537,6 +999,31 @@ def get_system_prompt(profile_key: str = None) -> str:
             signal_hint += f"- {prefixed_name}: {signal_desc}\n"
     
     return SYSTEM_PROMPT_BASE + signal_hint + "\n\n" + profile.instructions
+
+
+def get_system_prompt_with_phase_context(
+    profile: InstructionProfile, 
+    phase_context: str = ""
+) -> str:
+    """Build system prompt for a profile with optional phase context.
+    
+    Used when running an InstructionProfile as part of a PhaseProfile.
+    The phase_context is injected between the base prompt and profile instructions.
+    """
+    # Build signal hints
+    signal_hint = ""
+    if profile.signals:
+        signal_hint = "\n\nSIGNALS YOU MAY EMIT:\n"
+        for signal_name, signal_desc in profile.signals.items():
+            prefixed_name = f"custom.{signal_name}"
+            signal_hint += f"- {prefixed_name}: {signal_desc}\n"
+    
+    # Inject phase context if provided
+    phase_section = ""
+    if phase_context:
+        phase_section = f"\n\n=== PHASE CONTEXT ===\n{phase_context}\n===================\n"
+    
+    return SYSTEM_PROMPT_BASE + signal_hint + phase_section + "\n\n" + profile.instructions
 
 
 # Backwards compatibility
