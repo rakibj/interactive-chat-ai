@@ -20,7 +20,8 @@ class ActionType(Enum):
     INTERRUPT_AI = "INTERRUPT_AI"
     PROCESS_TURN = "PROCESS_TURN"
     PLAY_ACK = "PLAY_ACK"
-    SPEAK_SENTENCE = "SPEAK_SENTENCE"  # New
+    SPEAK_SENTENCE = "SPEAK_SENTENCE"
+    LOG_TURN = "LOG_TURN"  # Analytics logging
 
 @dataclass(frozen=True)
 class Event:
@@ -70,6 +71,18 @@ class SystemState:
     # History
     turn_id: int = 0
     state_machine: str = "IDLE"  # IDLE, SPEAKING, PAUSING
+    
+    # Turn Metrics (for analytics logging)
+    turn_interrupt_attempts: int = 0
+    turn_interrupt_accepts: int = 0
+    turn_partial_transcripts: List[str] = field(default_factory=list)
+    turn_final_transcript: str = ""
+    turn_ai_transcript: str = ""
+    turn_end_reason: str = ""  # silence, safety_timeout, limit_exceeded
+    turn_transcription_ms: float = 0.0
+    turn_llm_generation_ms: float = 0.0
+    turn_total_latency_ms: float = 0.0
+    turn_confidence_score: float = 1.0
 
 class Reducer:
     """Deterministic logic for state transitions."""
@@ -121,7 +134,9 @@ class Reducer:
                 # Interruption Check
                 if state.is_ai_speaking:
                     should_int, reason = Reducer._check_interruption(state, event)
+                    state.turn_interrupt_attempts += 1
                     if should_int:
+                        state.turn_interrupt_accepts += 1
                         state.last_interrupt_time = event.timestamp
                         state.is_ai_speaking = False
                         state.ai_speech_queue.clear()
@@ -137,6 +152,7 @@ class Reducer:
             text = event.payload.get("text", "")
             state.current_partial_transcript = text
             if text:
+                state.turn_partial_transcripts.append(text)
                 actions.append(Action(ActionType.LOG, {"message": f"📝 ASR Partial: '{text}'"}))
             
         elif event.type == EventType.AI_SENTENCE_READY:
@@ -160,12 +176,41 @@ class Reducer:
 
         elif event.type == EventType.RESET_TURN:
             actions.append(Action(ActionType.LOG, {"message": "🔄 Resetting for next turn"}))
+            
+            # Log turn analytics if we have a recorded turn
+            if state.turn_start_time and state.turn_final_transcript:
+                actions.append(Action(ActionType.LOG_TURN, {
+                    "turn_id": state.turn_id,
+                    "timestamp": state.turn_start_time,
+                    "interrupt_attempts": state.turn_interrupt_attempts,
+                    "interrupt_accepts": state.turn_interrupt_accepts,
+                    "partial_transcripts": state.turn_partial_transcripts,
+                    "final_transcript": state.turn_final_transcript,
+                    "ai_transcript": state.turn_ai_transcript,
+                    "end_reason": state.turn_end_reason,
+                    "transcription_ms": state.turn_transcription_ms,
+                    "llm_generation_ms": state.turn_llm_generation_ms,
+                    "total_latency_ms": state.turn_total_latency_ms,
+                    "confidence_score": state.turn_confidence_score,
+                }))
+            
+            # Reset turn metrics
             state.turn_audio_buffer.clear()
             state.current_partial_transcript = ""
             state.turn_start_time = None
             state.last_voice_time = None
             state.human_speaking_limit_ack_sent = False
             state.force_ended = False
+            state.turn_interrupt_attempts = 0
+            state.turn_interrupt_accepts = 0
+            state.turn_partial_transcripts = []
+            state.turn_final_transcript = ""
+            state.turn_ai_transcript = ""
+            state.turn_end_reason = ""
+            state.turn_transcription_ms = 0.0
+            state.turn_llm_generation_ms = 0.0
+            state.turn_total_latency_ms = 0.0
+            state.turn_confidence_score = 1.0
             state.turn_id += 1
             
         elif event.type == EventType.TICK:
@@ -187,12 +232,14 @@ class Reducer:
             # Change: Authority-aware force end
             if state.authority != "human" and elapsed_ms >= state.safety_timeout_ms:
                 state.force_ended = True
+                state.turn_end_reason = "safety_timeout"
                 actions.append(Action(ActionType.LOG, {"message": f"📍 Processing Turn (Reason: safety_timeout)"}))
                 actions.append(Action(ActionType.PROCESS_TURN, {"reason": "safety_timeout"}))
                 state.state_machine = "IDLE" # Reset machine for next turn
             
             # Normal turn end (Confidence based - simplified for now)
             elif elapsed_ms >= state.end_ms:
+                state.turn_end_reason = "silence"
                 actions.append(Action(ActionType.LOG, {"message": f"📍 Processing Turn (Reason: silence)"}))
                 actions.append(Action(ActionType.PROCESS_TURN, {"reason": "silence"}))
                 state.state_machine = "IDLE"
@@ -205,6 +252,7 @@ class Reducer:
                 actions.append(Action(ActionType.PLAY_ACK, {"reason": "limit_exceeded"}))
                 # In event-driven, we might force a turn end or just play ack
                 if state.state_machine == "PAUSING":
+                     state.turn_end_reason = "limit_exceeded"
                      actions.append(Action(ActionType.LOG, {"message": f"📍 Processing Turn (Reason: limit_exceeded)"}))
                      actions.append(Action(ActionType.PROCESS_TURN, {"reason": "limit_exceeded"}))
                      state.state_machine = "IDLE"

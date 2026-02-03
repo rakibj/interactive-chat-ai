@@ -221,6 +221,7 @@ class ConversationEngine:
         elif action.type == ActionType.SPEAK_SENTENCE:
             text = action.payload.get("text")
             self.speech_to_speak_queue.put(text)
+            self.state.turn_ai_transcript += text + " "
 
         elif action.type == ActionType.PROCESS_TURN:
             reason = action.payload.get("reason")
@@ -232,6 +233,40 @@ class ConversationEngine:
             
             # Run transcription/LLM in background thread
             threading.Thread(target=self._process_turn_async, args=(turn_audio, reason), daemon=True).start()
+        
+        elif action.type == ActionType.LOG_TURN:
+            # Extract turn metrics from action payload
+            from core.analytics import TurnAnalytics
+            
+            payload = action.payload
+            turn_analytics = TurnAnalytics(
+                turn_id=payload.get("turn_id", 0),
+                timestamp=payload.get("timestamp", time.time()),
+                profile_name=self.profile_settings["name"],
+                human_speech_duration_sec=payload.get("total_latency_ms", 0) / 1000.0 if payload.get("total_latency_ms") else 0,
+                ai_speech_duration_sec=0,  # Will be captured from TTS
+                silence_before_end_ms=0,
+                interrupt_attempts=payload.get("interrupt_attempts", 0),
+                interrupts_accepted=payload.get("interrupt_accepts", 0),
+                interrupts_blocked=payload.get("interrupt_attempts", 0) - payload.get("interrupt_accepts", 0),
+                interrupt_trigger_reasons=[],
+                end_reason=payload.get("end_reason", "silence"),
+                authority_mode=self.state.authority,
+                sensitivity_value=self.state.interruption_sensitivity,
+                partial_transcript_lengths=[len(t.split()) for t in payload.get("partial_transcripts", [])],
+                final_transcript_length=len(payload.get("final_transcript", "").split()),
+                confidence_score_at_cutoff=payload.get("confidence_score", 1.0),
+                transcription_ms=payload.get("transcription_ms", 0),
+                llm_generation_ms=payload.get("llm_generation_ms", 0),
+                total_latency_ms=payload.get("total_latency_ms", 0),
+                human_transcript=payload.get("final_transcript", ""),
+                ai_transcript=payload.get("ai_transcript", "").strip(),
+                transcript_timestamp=payload.get("timestamp", time.time()),
+            )
+            
+            # Log to analytics system
+            self.session_analytics.log_turn(turn_analytics)
+            print(f"📊 Turn #{payload.get('turn_id', 0)} logged to analytics")
 
     def _process_turn_async(self, audio_frames: List, reason: str) -> None:
         """Heavy lifting for turn processing (ASR -> LLM -> TTS)."""
@@ -239,8 +274,12 @@ class ConversationEngine:
             if not audio_frames:
                 return
                 
+            # Capture transcription timing
+            transcription_start = time.time()
             full_audio = np.concatenate(audio_frames)
             user_text = self.asr.transcribe(full_audio).strip()
+            self.state.turn_transcription_ms = (time.time() - transcription_start) * 1000
+            self.state.turn_final_transcript = user_text
             
             if not user_text or not any(c.isalpha() for c in user_text):
                 return
@@ -248,7 +287,8 @@ class ConversationEngine:
             print(f"💬 User: '{user_text}'")
             self.conversation_memory.add_message("user", user_text)
             
-            # LLM Stream
+            # LLM Stream with timing
+            llm_start = time.time()
             messages = [{"role": "system", "content": get_system_prompt(ACTIVE_PROFILE)}] + self.conversation_memory.get_messages()
             full_response = ""
             sentence_buffer = ""
@@ -268,6 +308,9 @@ class ConversationEngine:
                     if token in ".!?":
                         self.event_queue.put(Event(EventType.AI_SENTENCE_READY, time.time(), "llm", {"text": sentence_buffer.strip()}))
                         sentence_buffer = ""
+            
+            self.state.turn_llm_generation_ms = (time.time() - llm_start) * 1000
+            self.state.turn_total_latency_ms = (time.time() - transcription_start) * 1000
             
             if sentence_buffer.strip():
                 self.event_queue.put(Event(EventType.AI_SENTENCE_READY, time.time(), "llm", {"text": sentence_buffer.strip()}))
