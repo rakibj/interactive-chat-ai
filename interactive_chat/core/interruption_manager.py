@@ -1,4 +1,11 @@
-"""Interruption manager with sensitivity-aware logic."""
+"""DEPRECATED: Interruption logic has been moved to event_driven_core.Reducer.
+
+This module is kept for reference but is no longer used. All interruption detection
+logic (energy-based, speech-based, sensitivity levels) is now handled in the
+centralized Reducer.reduce() function via _check_interruption() method.
+
+See: core/event_driven_core.py, Reducer._check_interruption() and Reducer.reduce()
+"""
 import time
 from typing import Tuple, Optional
 from config import (

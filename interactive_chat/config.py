@@ -89,7 +89,7 @@ class InstructionProfile(BaseModel):
 
 # Conversation Configuration
 CONVERSATION_START = "human"  # Options: "human" or "ai" (can be overridden per profile)
-ACTIVE_PROFILE = "confused_customer"  # Select which profile to use
+ACTIVE_PROFILE = "negotiator"  # Select which profile to use
 
 # Default LLM Parameters (can be overridden per profile)
 LLM_MAX_TOKENS = 80
@@ -201,7 +201,7 @@ TONE: Professional, encouraging, supportive.""",
         pause_ms=700,
         end_ms=1400,
         safety_timeout_ms=2800,
-        interruption_sensitivity=0.5,
+        interruption_sensitivity=0,
         authority="human",
         human_speaking_limit_sec=5,
         acknowledgments=[

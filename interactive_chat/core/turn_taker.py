@@ -1,4 +1,11 @@
-"""Turn-taking state machine with confidence scoring."""
+"""DEPRECATED: Turn-taking logic has been moved to event_driven_core.Reducer.
+
+This module is kept for reference but is no longer used. All turn-taking state
+machine logic (IDLE -> SPEAKING -> PAUSING -> PROCESSING) is now handled in the
+centralized Reducer.reduce() function as part of the event-driven architecture.
+
+See: core/event_driven_core.py, Reducer.reduce()
+"""
 import numpy as np
 from collections import deque
 from typing import Tuple
