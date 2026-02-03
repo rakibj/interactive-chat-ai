@@ -268,6 +268,7 @@ SYSTEM_PROMPT_BASE
 ```
 
 **Phase Isolation**: Each phase operates independently:
+
 - Conversation memory cleared on transition (prevents cross-phase confusion)
 - All turn metrics reset for new phase
 - Phase signals reset so only current phase's signals matter for transitions
