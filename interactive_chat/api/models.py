@@ -1,6 +1,6 @@
 """Pydantic models for API requests and responses."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
@@ -261,5 +261,100 @@ class APILimitation(BaseModel):
                 "workaround": "Reload page to reset state between conversations",
                 "planned_fix": "Phase 2 adds session isolation via WebSocket",
                 "phase": "phase_2"
+            }
+        }
+
+class TextInput(BaseModel):
+    """User text input to engine (simulates ASR output)."""
+    
+    text: str = Field(
+        ...,
+        min_length=1,
+        max_length=1000,
+        description="User input text to process"
+    )
+    
+    @field_validator('text')
+    @classmethod
+    def validate_non_whitespace(cls, v):
+        """Ensure text is not just whitespace."""
+        if not v or not v.strip():
+            raise ValueError('Text must contain non-whitespace characters')
+        return v.strip()
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "text": "My hometown is in the mountains"
+            }
+        }
+
+
+class EngineCommandRequest(BaseModel):
+    """Command to control engine state."""
+    
+    command: str = Field(
+        ...,
+        description="Command: 'start', 'stop', 'pause', or 'resume'"
+    )
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "command": "pause"
+            }
+        }
+
+
+class EngineCommandResponse(BaseModel):
+    """Response from engine command."""
+    
+    status: str = Field(..., description="Command status")
+    message: str = Field(..., description="Human-readable message")
+    timestamp: Optional[str] = Field(None, description="ISO timestamp")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "status": "paused",
+                "message": "Engine paused",
+                "timestamp": "2026-02-04T12:34:56.789Z"
+            }
+        }
+
+
+class ConversationReset(BaseModel):
+    """Reset conversation to start fresh."""
+    
+    keep_profile: bool = Field(
+        True,
+        description="Keep current profile (True) or reset to initial phase (False)"
+    )
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "keep_profile": True
+            }
+        }
+
+
+class ResetResponse(BaseModel):
+    """Response from reset operation."""
+    
+    status: str = Field(..., description="'reset' on success")
+    message: str = Field(..., description="Status message")
+    conversation_memory_cleared: bool = Field(..., description="Whether memory was cleared")
+    phase_reset: bool = Field(..., description="Whether phase was reset")
+    timestamp: Optional[str] = Field(None, description="ISO timestamp")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "status": "reset",
+                "message": "Conversation reset successfully",
+                "conversation_memory_cleared": True,
+                "phase_reset": False,
+                "timestamp": "2026-02-04T12:34:56.789Z"
             }
         }
