@@ -44,7 +44,14 @@ def mock_engine():
     engine = Mock()
     engine.event_queue = []
     engine.is_paused = False
-    engine.conversation_history = []
+    
+    # Mock conversation_memory with clear() method
+    mock_memory = Mock()
+    mock_memory.memory = []
+    mock_memory.clear = Mock(side_effect=lambda: mock_memory.memory.clear())
+    mock_memory.__len__ = Mock(side_effect=lambda: len(mock_memory.memory))
+    engine.conversation_memory = mock_memory
+    
     engine.active_phase_profile = 0
     
     def get_state():
@@ -257,7 +264,8 @@ class TestEngineCommandEndpoint:
         data = response.json()
         assert data["status"] == "stopped"
         assert mock_engine.is_paused is True
-        assert len(mock_engine.conversation_history) == 0
+        # Verify memory was cleared
+        mock_engine.conversation_memory.clear.assert_called()
     
     def test_command_pause(self, client, mock_engine):
         """Send 'pause' command."""
@@ -331,7 +339,7 @@ class TestConversationResetEndpoint:
     
     def test_reset_keep_profile(self, client, mock_engine):
         """Reset with keep_profile=True."""
-        mock_engine.conversation_history = [{"text": "test"}]
+        mock_engine.conversation_memory.memory = [{"text": "test"}]
         response = client.post(
             "/api/conversation/reset",
             json={"keep_profile": True}
@@ -341,13 +349,13 @@ class TestConversationResetEndpoint:
         assert data["status"] == "reset"
         assert data["conversation_memory_cleared"] is True
         assert data["phase_reset"] is False
-        # Verify memory cleared
-        assert len(mock_engine.conversation_history) == 0
+        # Verify memory was cleared
+        mock_engine.conversation_memory.clear.assert_called()
     
     def test_reset_new_profile(self, client, mock_engine):
         """Reset with keep_profile=False."""
         mock_engine.active_phase_profile = 2
-        mock_engine.conversation_history = [{"text": "test"}]
+        mock_engine.conversation_memory.memory = [{"text": "test"}]
         response = client.post(
             "/api/conversation/reset",
             json={"keep_profile": False}
@@ -434,7 +442,7 @@ class TestPhase4Integration:
     
     def test_control_flow_reset_then_input(self, client, mock_engine):
         """Control flow: Reset → Input."""
-        mock_engine.conversation_history = [{"text": "old"}]
+        mock_engine.conversation_memory.memory = [{"text": "old"}]
         
         # Reset
         response = client.post(
@@ -442,7 +450,8 @@ class TestPhase4Integration:
             json={"keep_profile": True}
         )
         assert response.status_code == 200
-        assert len(mock_engine.conversation_history) == 0
+        # Verify memory was cleared
+        mock_engine.conversation_memory.clear.assert_called()
         
         # Send text
         response = client.post(

@@ -586,7 +586,7 @@ def handle_engine_command(cmd: EngineCommandRequest):
             )
         elif command == "stop":
             _engine.is_paused = True
-            _engine.conversation_history.clear()
+            _engine.conversation_memory.clear()
             return EngineCommandResponse(
                 status="stopped",
                 message="Engine stopped and memory cleared",
@@ -632,7 +632,7 @@ def reset_conversation(reset_req: ConversationReset):
         timestamp = datetime.now().isoformat()
         
         # Clear conversation memory
-        _engine.conversation_history.clear()
+        _engine.conversation_memory.clear()
         
         # Reset phase if requested
         phase_reset = False

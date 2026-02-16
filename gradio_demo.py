@@ -408,365 +408,133 @@ class GradioDemoApp:
             return f"❌ Error: {str(e)}"
     
     def build_interface(self) -> gr.Blocks:
-        """Build the Gradio interface.
+        """Build the Gradio interface (simplified).
         
         Returns:
             Gradio Blocks interface
         """
         with gr.Blocks(
-            title="Interactive Chat AI - Gradio Demo"
+            title="Interactive Chat AI"
         ) as demo:
             # Title
-            gr.Markdown(
-                "# 🎤 Interactive Chat AI - Gradio Demo\n\n"
-                "Real-time demonstration of multi-phase conversational AI"
+            gr.Markdown("# 🎤 Interactive Chat AI")
+            
+            # Speaker status
+            speaker_display = gr.Label(
+                label="🎤 Current Speaker",
+                num_top_classes=1,
+                value="Waiting..."
             )
             
+            # Transcript
+            transcript_display = gr.Textbox(
+                label="📋 Transcript",
+                lines=15,
+                interactive=False,
+                placeholder="Transcript will appear here",
+                value="Start conversation to see transcript..."
+            )
+            
+            # Control buttons - Start/Stop toggle
             with gr.Row():
-                # Left column: Main displays
-                with gr.Column(scale=3):
-                    # Phase progress
-                    phase_display = gr.Markdown(
-                        label="Phase Progress",
-                        value="Loading..."
-                    )
-                    
-                    # Speaker status
-                    speaker_display = gr.Label(
-                        label="Current Speaker",
-                        num_top_classes=1,
-                        value="Waiting..."
-                    )
-                    
-                    # Live captions
-                    captions_display = gr.Textbox(
-                        label="Live Captions",
-                        lines=2,
-                        interactive=False,
-                        placeholder="Waiting for speech...",
-                        value="Waiting for conversation to start..."
-                    )
+                # State tracking for button visibility
+                is_running = gr.State(False)
                 
-                # Right column: Session info
-                with gr.Column(scale=2):
-                    session_info = gr.Json(
-                        label="Session Information",
-                        value={"status": "Loading..."}
-                    )
-            
-            # Conversation history
-            history_display = gr.HTML(
-                label="Conversation History",
-                value="<div style='color: #999; padding: 20px;'>No conversation yet...</div>"
-            )
-            
-            # Transcript section (collapsible)
-            with gr.Accordion("📋 Full Transcript", open=False):
-                transcript_display = gr.Textbox(
-                    label="Plaintext Transcript",
-                    lines=12,
-                    interactive=False,
-                    placeholder="Full transcript will appear here"
-                )
-            
-            # API Status
-            with gr.Accordion("ℹ️ API Information", open=False):
-                api_info = gr.Markdown(
-                    f"**API Base URL**: {self.api_base}\n\n"
-                    "Make sure the server is running:\n"
-                    "```bash\npython -m interactive_chat.main --no-gradio\n```"
-                )
-            
-            # Controls
-            with gr.Row():
-                refresh_btn = gr.Button(
-                    "🔄 Refresh Now",
-                    variant="primary",
-                    scale=1
-                )
-                copy_btn = gr.Button(
-                    "📋 Copy Transcript",
-                    scale=1
-                )
-            
-            # ================================================================
-            # PHASE 4: INTERACTIVE CONTROLS
-            # ================================================================
-            gr.Markdown("## 🎮 Interactive Controls")
-            
-            # Text input for sending messages
-            with gr.Row():
-                text_input = gr.Textbox(
-                    label="Send Text Input (simulates voice transcription)",
-                    placeholder="Type your message here...",
-                    lines=2
-                )
-                send_btn = gr.Button(
-                    "📤 Send",
-                    variant="primary",
-                    scale=0,
-                    min_width=80
-                )
-            
-            # Engine control buttons
-            with gr.Row():
                 start_btn = gr.Button(
                     "▶️ Start",
                     variant="primary",
-                    scale=1
-                )
-                pause_btn = gr.Button(
-                    "⏸️ Pause",
-                    scale=1
-                )
-                resume_btn = gr.Button(
-                    "▶️ Resume",
-                    scale=1
+                    scale=1,
+                    visible=True
                 )
                 stop_btn = gr.Button(
                     "⏹️ Stop",
                     variant="stop",
+                    scale=1,
+                    visible=False
+                )
+                refresh_btn = gr.Button(
+                    "🔄 Refresh",
                     scale=1
                 )
             
-            # Conversation reset
-            with gr.Row():
-                reset_profile_btn = gr.Button(
-                    "🔄 Reset (Keep Profile)",
-                    scale=2
-                )
-                reset_all_btn = gr.Button(
-                    "🔄 Reset (New Profile)",
-                    variant="stop",
-                    scale=2
-                )
+            # Hidden components for auto-refresh
+            timer = gr.State(value=0)
+            auto_update = gr.Textbox(visible=False, value="0")
             
-            # Status message
-            status_display = gr.Textbox(
-                label="Status",
-                interactive=False,
-                value="✅ Initializing...",
-                lines=1
-            )
-            
-            # Update function - fetches from API and updates all displays
-            def update_all_displays():
-                """Fetch state and update all displays."""
+            # Update function - fetch transcript and speaker
+            def update_display():
+                """Fetch state and update displays."""
                 state = self.get_full_state()
-                
-                phase_md = self.format_phase_progress(state)
-                speaker_label, speaker_probs = self.format_speaker_status(state)
-                captions = self.format_live_captions(state)
-                session_json = self.format_session_info(state)
-                history_html = self.format_conversation_history_html(state)
+                speaker_label, _ = self.format_speaker_status(state)
                 transcript = self.get_transcript_text(state)
-                
-                # Status message
-                if "error" in state:
-                    status = f"🔴 {state['error']}"
-                else:
-                    turn_count = len(state.get("history", []))
-                    is_processing = state.get("is_processing", False)
-                    processing_str = " (Processing turn...)" if is_processing else ""
-                    status = f"✅ Connected | {turn_count} turns{processing_str}"
-                
-                # Return values in correct order for Gradio 6.0
-                # Note: speaker_label is the display value for the Label component
-                return [
-                    phase_md,
-                    speaker_label,  # For gr.Label, just return the string directly
-                    captions,
-                    session_json,
-                    history_html,
-                    transcript,
-                    status
-                ]
+                return [speaker_label, transcript]
             
-            # ================================================================
-            # PHASE 4: EVENT HANDLERS FOR CONTROLS
-            # ================================================================
-            
-            def handle_text_submit(text: str):
-                """Handle text input submission."""
-                msg = self.send_text_input(text)
-                # Update displays after sending
-                time.sleep(0.2)  # Brief delay for engine processing
-                displays = update_all_displays()
-                return [msg] + displays + [""]  # Clear text input
-            
+            # Event handlers
             def handle_start():
-                """Handle start button."""
-                msg = self.send_engine_command("start")
-                time.sleep(0.2)
-                displays = update_all_displays()
-                return [msg] + displays
-            
-            def handle_pause():
-                """Handle pause button."""
-                msg = self.send_engine_command("pause")
-                time.sleep(0.2)
-                displays = update_all_displays()
-                return [msg] + displays
-            
-            def handle_resume():
-                """Handle resume button."""
-                msg = self.send_engine_command("resume")
-                time.sleep(0.2)
-                displays = update_all_displays()
-                return [msg] + displays
+                """Handle start button - send start command."""
+                self.send_engine_command("start")
+                time.sleep(0.3)
+                speaker, transcript = update_display()
+                # Return: speaker, transcript, new is_running state, start visible, stop visible
+                return [speaker, transcript, True, gr.update(visible=False), gr.update(visible=True)]
             
             def handle_stop():
-                """Handle stop button."""
-                msg = self.send_engine_command("stop")
-                time.sleep(0.2)
-                displays = update_all_displays()
-                return [msg] + displays
+                """Handle stop button - send stop command."""
+                self.send_engine_command("stop")
+                time.sleep(0.3)
+                speaker, transcript = update_display()
+                # Return: speaker, transcript, new is_running state, start visible, stop visible
+                return [speaker, transcript, False, gr.update(visible=True), gr.update(visible=False)]
             
-            def handle_reset_profile():
-                """Handle reset with profile."""
-                msg = self.reset_conversation(keep_profile=True)
-                time.sleep(0.2)
-                displays = update_all_displays()
-                return [msg] + displays
+            def handle_refresh(dummy_input):
+                """Handle refresh - also updates auto_update to trigger refresh."""
+                speaker, transcript = update_display()
+                # Return speaker, transcript, and increment auto_update to trigger next refresh
+                return [speaker, transcript, str(int(time.time()))]
             
-            def handle_reset_all():
-                """Handle reset all."""
-                msg = self.reset_conversation(keep_profile=False)
-                time.sleep(0.2)
-                displays = update_all_displays()
-                return [msg] + displays
-            
-            # Wire up control handlers
-            send_btn.click(
-                handle_text_submit,
-                inputs=text_input,
-                outputs=[
-                    status_display,
-                    phase_display,
-                    speaker_display,
-                    captions_display,
-                    session_info,
-                    history_display,
-                    transcript_display,
-                    text_input
-                ]
-            )
-            
+            # Wire up button handlers
             start_btn.click(
                 handle_start,
-                outputs=[
-                    status_display,
-                    phase_display,
-                    speaker_display,
-                    captions_display,
-                    session_info,
-                    history_display,
-                    transcript_display
-                ]
-            )
-            
-            pause_btn.click(
-                handle_pause,
-                outputs=[
-                    status_display,
-                    phase_display,
-                    speaker_display,
-                    captions_display,
-                    session_info,
-                    history_display,
-                    transcript_display
-                ]
-            )
-            
-            resume_btn.click(
-                handle_resume,
-                outputs=[
-                    status_display,
-                    phase_display,
-                    speaker_display,
-                    captions_display,
-                    session_info,
-                    history_display,
-                    transcript_display
-                ]
+                outputs=[speaker_display, transcript_display, is_running, start_btn, stop_btn]
             )
             
             stop_btn.click(
                 handle_stop,
-                outputs=[
-                    status_display,
-                    phase_display,
-                    speaker_display,
-                    captions_display,
-                    session_info,
-                    history_display,
-                    transcript_display
-                ]
+                outputs=[speaker_display, transcript_display, is_running, start_btn, stop_btn]
             )
             
-            reset_profile_btn.click(
-                handle_reset_profile,
-                outputs=[
-                    status_display,
-                    phase_display,
-                    speaker_display,
-                    captions_display,
-                    session_info,
-                    history_display,
-                    transcript_display
-                ]
-            )
-            
-            reset_all_btn.click(
-                handle_reset_all,
-                outputs=[
-                    status_display,
-                    phase_display,
-                    speaker_display,
-                    captions_display,
-                    session_info,
-                    history_display,
-                    transcript_display
-                ]
-            )
-            
-            # Refresh button
+            # Refresh button updates auto_update which triggers auto-refresh
             refresh_btn.click(
-                update_all_displays,
-                outputs=[
-                    phase_display,
-                    speaker_display,
-                    captions_display,
-                    session_info,
-                    history_display,
-                    transcript_display,
-                    status_display
-                ]
+                handle_refresh,
+                inputs=[auto_update],
+                outputs=[speaker_display, transcript_display, auto_update]
             )
             
-            # Copy transcript button
-            def copy_transcript():
-                """Return full transcript for manual copying."""
-                state = self.get_full_state()
-                return self.get_transcript_text(state)
-            
-            copy_btn.click(
-                copy_transcript,
-                outputs=transcript_display
+            # Auto-refresh every 500ms - update display whenever auto_update changes
+            auto_update.change(
+                handle_refresh,
+                inputs=[auto_update],
+                outputs=[speaker_display, transcript_display, auto_update]
             )
             
-            # Initial load on page load
+            # Initial load and continuous refresh
+            def initial_load():
+                """Initial load and start auto-refresh timer."""
+                speaker, transcript = update_display()
+                # Start a background thread that updates auto_update every 500ms
+                def refresh_loop():
+                    while True:
+                        time.sleep(0.5)
+                        # This would ideally trigger auto_update change, but Gradio doesn't support this
+                        # Instead, we'll rely on manual refresh or component updates
+                        pass
+                # Note: Gradio doesn't easily support server-side timed updates
+                # The refresh button provides manual refresh capability
+                return [speaker, transcript]
+            
             demo.load(
-                update_all_displays,
-                outputs=[
-                    phase_display,
-                    speaker_display,
-                    captions_display,
-                    session_info,
-                    history_display,
-                    transcript_display,
-                    status_display
-                ]
+                initial_load,
+                outputs=[speaker_display, transcript_display]
             )
 
         
@@ -800,8 +568,8 @@ def main():
             .demo-subtitle { text-align: center; color: #666; margin-bottom: 20px; }
             .status-connected { color: #00aa00; font-weight: bold; }
             .status-error { color: #cc0000; font-weight: bold; }
-            .phase-display { font-family: monospace; }
-        """
+        """,
+        head="<script>setInterval(() => { let btn = document.querySelector('button:nth-child(3)'); if (btn && btn.textContent.includes('Refresh')) btn.click(); }, 500);</script>"
     )
 
 

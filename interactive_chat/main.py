@@ -739,9 +739,9 @@ class ConversationEngine:
         signal_registry = get_signal_registry()
         signal_registry.register_all(handle_signal)  # Log all signals to stdout
         
-        # Initial Greeting if AI starts
-        if self.profile_settings["start"] == "ai":
-            threading.Thread(target=self._generate_ai_turn, daemon=True).start()
+        # NOTE: Engine waits for user to click Start in Gradio UI - no auto-start
+        # if self.profile_settings["start"] == "ai":
+        #     threading.Thread(target=self._generate_ai_turn, daemon=True).start()
 
         try:
             while not self.shutdown_event.is_set():
@@ -775,7 +775,8 @@ class ConversationEngine:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Interactive Chat AI Engine")
     parser.add_argument('--no-api', action='store_true', help='Skip API server (run engine only)')
-    parser.add_argument('--no-gradio', action='store_true', help='Skip Gradio (for backwards compatibility)')
+    parser.add_argument('--no-gradio', action='store_true', help='Skip Gradio (API/Engine only)')
+    parser.add_argument('--api-only', action='store_true', help='Run API server only (no engine)')
     args = parser.parse_args()
     
     # Create engine instance FIRST (before API server)
@@ -784,8 +785,8 @@ if __name__ == "__main__":
     # Set global engine for API access
     set_global_engine(engine)
     
-    # Start API server in background thread (unless --no-api flag)
-    if not args.no_api:
+    # Start API server in background thread (unless --no-api or --api-only flag)
+    if not args.no_api and not args.api_only:
         try:
             import uvicorn
             from interactive_chat import server as api_server
@@ -810,5 +811,43 @@ if __name__ == "__main__":
             print(f"⚠️  Could not start API server: {e}")
             print("   Run with --no-api to skip API server")
     
-    # Run the engine (this blocks until shutdown)
-    engine.run()
+    # Launch Gradio (unless --no-gradio flag)
+    if not args.no_gradio:
+        try:
+            from gradio_demo import GradioDemoApp
+            
+            # Give user instructions
+            print("\n" + "="*60)
+            print("🎤 INTERACTIVE CHAT AI - Gradio Interface")
+            print("="*60)
+            print("\n✅ API Server:  http://localhost:8000")
+            print("✅ Gradio Demo: http://localhost:7860")
+            print("\n💡 Complete Gradio-controlled solution:")
+            print("   Start:  Gradio interface launches")
+            print("   Use:    Gradio buttons and text inputs")
+            print("   Stop:   Close Gradio window or Ctrl+C")
+            print("\n" + "="*60 + "\n")
+            
+            # Create and launch Gradio app
+            app = GradioDemoApp()
+            interface = app.build_interface()
+            
+            # Launch in blocking mode (this becomes the main thread)
+            interface.launch(
+                server_name="127.0.0.1",
+                server_port=7860,
+                share=False,
+                inbrowser=True  # Automatically open browser
+            )
+        except ImportError:
+            print("⚠️  Gradio not available, running engine only")
+            print("   Install Gradio: pip install gradio")
+            # Run engine in background since Gradio wasn't started
+            engine.run()
+        except Exception as e:
+            print(f"⚠️  Could not start Gradio: {e}")
+            # Run engine in background since Gradio failed to start
+            engine.run()
+    else:
+        # No Gradio requested, run engine directly
+        engine.run()
