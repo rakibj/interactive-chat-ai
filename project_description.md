@@ -210,20 +210,26 @@ SystemState now tracks per-turn metrics for automatic analytics logging:
 
 **Custom LLM-Emitted Signals** (per profile):
 
-- Extracted from LLM response as `<signals>{JSON}</signals>` blocks
-- Prefixed with `custom.` namespace (e.g., `custom.exam.question_asked`)
-- Profile-specific, defined in `InstructionProfile.signals` dict
+- Only signals are implemented for custom LLM responses.
+- Signals are extracted from LLM responses as `<signals>{JSON}</signals>` blocks at the end of the text response.
+- Signals are used for phase transitions, analytics, and observability, but do not trigger tool calls or direct actions.
+- Signals are prefixed with `custom.` namespace (e.g., `custom.exam.question_asked`) and are profile-specific, defined in `InstructionProfile.signals` dict.
 
-**Demo UI Integration Points** (for Gradio/Next.js):
+**Key Insight**: Signals describe state changes and observations; they do not trigger state transitions or tool calls. LLM can emit signals to describe its observations, which are used for analytics, phase transitions, and UI updates.
 
-- `VAD_SPEECH_STARTED`/`ENDED` → Update "Human Speaking" indicator
-- `TTS_SPEAKING_STARTED`/`ENDED` → Update "AI Speaking" indicator
-- `SPEAKER_CHANGED` → Change speaker highlight (human/ai/silence)
-- `PHASE_PROGRESS_UPDATED` → Update progress bar (e.g., "IELTS Part 2 of 5")
-- `TURN_COMPLETED` → Add turn to conversation history with speaker tags
-- `PHASE_TRANSITION_COMPLETE` → Display phase banner ("Entering Part 3")
+**How It Works**:
 
-**Backward Compatibility**: 100% - All signals are optional. Core functions identically with zero listeners registered.
+1. System starts in `initial_phase`.
+2. After each AI response, signals are extracted from `<signals></signals>` blocks at the end of the response.
+3. Signals are checked against phase transition rules; if matched, a `PHASE_TRANSITION` event is emitted.
+4. The system loads the new InstructionProfile, updates SystemState, clears conversation memory and signal history, injects phase context, and generates an AI greeting if needed.
+5. Signals are used for analytics, phase transitions, and UI updates, but do not trigger tool calls or direct actions.
+
+**Custom Response Handling**:
+- Only signals are implemented for custom LLM responses. The LLM can emit signals in its response (e.g., `<signals>{...}</signals>`), which are used for phase transitions, analytics, and observability.
+- Signals do not trigger actions or tool calls; the architecture is signal-based and does not support tool call execution from LLM responses.
+
+This makes the system flexible for multi-phase flows and robust analytics, but custom actions or tool calls embedded in LLM responses are not supported.
 
 ### 4. Phased AI System (NEW - `config.py` + `main.py`)
 
@@ -713,7 +719,7 @@ VAD_SPEECH_START event
 - Multi-turn memory preserved correctly
 - All 6 critical signals emit at right times for demo UI
 - Authority modes enforce turn-taking rules
-- Edge cases (limits, timeouts, rapid interrupts) handled safely
+- Edge cases (limits, timeouts, rapid interruptions, safety limits) handled safely
 
 #### 4. State Machine (`test_headless_comprehensive.py`)
 

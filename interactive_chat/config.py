@@ -5,7 +5,7 @@ from typing import Optional, List
 from pydantic import BaseModel
 
 # Paths
-PROJECT_ROOT = Path(r"D:\Work\Projects\AI\interactive-chat-ai")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MODELS_ROOT = PROJECT_ROOT / "models"
 
 # Audio Configuration
