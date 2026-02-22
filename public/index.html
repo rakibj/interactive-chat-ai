@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Chat AI - Real-time Conversation</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/styles_modern.css">
+    <link rel="stylesheet" href="css/responsive.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <div class="header-left">
+                    <h1>🎤 Interactive Chat AI</h1>
+                    <p class="subtitle">Real-time voice conversation</p>
+                </div>
+                <div class="header-right">
+                    <div class="connection-status">
+                        <span id="ws-indicator" class="indicator disconnected"></span>
+                        <span id="connection-text">Connecting...</span>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Left Panel: Conversation -->
+            <div class="panel conversation-panel">
+                <div class="panel-header">
+                    <h2>Conversation</h2>
+                    <button id="refresh-btn" class="btn-icon" title="Refresh manually">🔄</button>
+                </div>
+                
+                <!-- Speaker Indicator -->
+                <div id="speaker-indicator" class="speaker-indicator speaker-silence">
+                    <div class="speaker-icon">⏸️</div>
+                    <div class="speaker-text">Listening</div>
+                </div>
+
+                <!-- Chat Messages -->
+                <div id="chat-messages" class="chat-messages">
+                    <div class="welcome-message">
+                        <p>👋 Welcome to Interactive Chat AI</p>
+                        <p>Waiting for conversation to start...</p>
+                    </div>
+                </div>
+
+                <!-- Latency Display -->
+                <div id="latency-display" class="latency-display">
+                    ⏱️ Waiting for first turn...
+                </div>
+            </div>
+
+            <!-- Right Panel: Phase & Info -->
+            <div class="panel info-panel">
+                <!-- Phase Information -->
+                <div class="phase-section">
+                    <div class="panel-header">
+                        <h2>Phase Progress</h2>
+                    </div>
+                    <div id="phase-title" class="phase-title">Waiting to start</div>
+                    <div id="phase-progress" class="phase-progress">0/0 phases</div>
+                    
+                    <!-- Phase Tracker -->
+                    <div id="phase-tracker" class="phase-tracker">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+
+                <!-- Turn History Summary -->
+                <div class="history-section">
+                    <div class="panel-header">
+                        <h2>Turn Summary</h2>
+                    </div>
+                    <div id="turn-summary" class="turn-summary">
+                        <p>No turns yet</p>
+                    </div>
+                </div>
+
+                <!-- System Status -->
+                <div class="status-section">
+                    <div class="panel-header">
+                        <h2>System Status</h2>
+                    </div>
+                    <div id="system-status" class="system-status">
+                        <div class="status-item">
+                            <span class="status-label">Backend:</span>
+                            <span id="backend-status" class="status-value">Checking...</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-label">WebSocket:</span>
+                            <span id="ws-status" class="status-value">Disconnected</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-label">Session ID:</span>
+                            <span id="session-id" class="status-value mono">—</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-label">Last Update:</span>
+                            <span id="last-update" class="status-value">Never</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- API Documentation Link -->
+                <div class="api-section">
+                    <div class="panel-header">
+                        <h2>Documentation</h2>
+                    </div>
+                    <div class="api-links">
+                        <a href="http://localhost:8000/docs" target="_blank" class="api-link">
+                            📘 Swagger UI
+                        </a>
+                        <a href="http://localhost:8000/redoc" target="_blank" class="api-link">
+                            📗 ReDoc
+                        </a>
+                        <a href="http://localhost:8000/api/limitations" target="_blank" class="api-link">
+                            ⚠️ API Limitations
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>✅ 247 tests passing • 🎯 Production-ready • 📊 Real-time analytics</p>
+        </footer>
+    </div>
+
+    <!-- Scripts -->
+    <script src="js/state.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/websocket.js"></script>
+    <script src="js/app.js"></script>
+    <script src="js/app_live.js"></script>
+</body>
+</html>

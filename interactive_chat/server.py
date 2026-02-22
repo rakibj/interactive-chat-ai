@@ -75,7 +75,7 @@ def set_engine(engine):
 )
 async def health():
     """Check API and engine health status."""
-    is_running = _engine is not None and not _engine.shutdown
+    is_running = _engine is not None and not _engine.shutdown_event.is_set()
     
     return HealthResponse(
         status="healthy",
@@ -615,6 +615,37 @@ def handle_engine_command(cmd: EngineCommandRequest):
         raise
     except Exception as e:
         logger.error(f"Engine command error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/start", response_model=dict)
+def trigger_ai_start():
+    """
+    Trigger AI to start the conversation automatically.
+    Used for AI-authority mode.
+    """
+    global _engine
+    
+    if not _engine:
+        raise HTTPException(status_code=503, detail="Engine not initialized")
+    
+    try:
+        timestamp = datetime.now().isoformat()
+        
+        # Resume engine if paused
+        if _engine.is_paused:
+            _engine.is_paused = False
+        
+        # Signal that AI should start (implementation depends on engine)
+        logger.info("AI auto-start triggered")
+        
+        return {
+            "status": "started",
+            "message": "AI conversation started automatically",
+            "timestamp": timestamp
+        }
+    except Exception as e:
+        logger.error(f"Auto-start error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

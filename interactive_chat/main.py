@@ -103,10 +103,18 @@ class TurnTiming:
 class ConversationEngine:
     """Main orchestration engine based on Event-Driven Core."""
     
-    def __init__(self):
+    def __init__(self, profile_key: str = None):
+        """Initialize ConversationEngine with optional profile override.
+        
+        Args:
+            profile_key: Profile key to use (overrides ACTIVE_PROFILE from config)
+        """
         # Determine if using PhaseProfile or standalone InstructionProfile
         self.active_phase_profile = None
         self.phase_emitted_signals = []  # Track signals for phase transitions
+        
+        # Use provided profile_key if given, otherwise use config
+        active_profile = profile_key or ACTIVE_PROFILE
         
         if ACTIVE_PHASE_PROFILE and ACTIVE_PHASE_PROFILE in PHASE_PROFILES:
             # Using PhaseProfile mode
@@ -123,7 +131,7 @@ class ConversationEngine:
             self.profile_settings = get_profile_settings(None, current_profile)
         else:
             # Using standalone InstructionProfile mode
-            self.profile_settings = get_profile_settings(ACTIVE_PROFILE)
+            self.profile_settings = get_profile_settings(active_profile)
             current_phase_id = None
         
         self.audio_manager = AudioManager()
@@ -729,6 +737,38 @@ class ConversationEngine:
                 
         except Exception as e:
             print(f"❌ Error in turn processing: {e}")
+
+    def _start_api_server(self) -> None:
+        """Start FastAPI server in background thread for remote API access.
+        
+        This method registers the engine with the API server and starts uvicorn.
+        Useful for custom entry points like run_html_app.py that need to start
+        the API server programmatically.
+        """
+        try:
+            import uvicorn
+            from interactive_chat import server as api_server
+            
+            # Register engine with API server
+            api_server.set_engine(self)
+            
+            def run_api():
+                uvicorn.run(
+                    api_server.app,
+                    host="0.0.0.0",
+                    port=8000,
+                    log_level="warning",
+                    access_log=False
+                )
+            
+            api_thread = threading.Thread(target=run_api, daemon=True)
+            api_thread.start()
+            print("✅ API server started in background (http://localhost:8000)")
+            time.sleep(3)  # Wait for API to fully start
+            
+        except Exception as e:
+            print(f"⚠️  Could not start API server: {e}")
+            print("   Run without API server capability")
 
     def run(self) -> None:
         """Main dispatcher loop (The Event Loop)."""

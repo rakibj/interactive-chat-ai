@@ -1,0 +1,338 @@
+/* ====== Responsive Design ====== */
+
+/* Tablets (768px - 1024px) */
+@media (max-width: 1024px) {
+    .main-content {
+        grid-template-columns: 1fr 280px;
+        gap: 12px;
+        padding: 12px;
+    }
+    
+    .header-content {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+    }
+    
+    .header-left h1 {
+        font-size: 20px;
+    }
+    
+    .message {
+        max-width: 90%;
+    }
+    
+    .phase-tracker {
+        flex-direction: row;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+    
+    .phase-item {
+        flex: 1;
+        min-width: 80px;
+    }
+}
+
+/* Small Tablets (600px - 768px) */
+@media (max-width: 768px) {
+    .main-content {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+    
+    .header {
+        padding: 12px;
+    }
+    
+    .header-content {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+    
+    .header-left h1 {
+        font-size: 18px;
+    }
+    
+    .panel {
+        padding: 12px;
+    }
+    
+    .chat-messages {
+        min-height: 300px;
+    }
+    
+    .message {
+        max-width: 95%;
+    }
+    
+    .speaker-indicator {
+        padding: 12px;
+        gap: 12px;
+    }
+    
+    .speaker-icon {
+        font-size: 24px;
+    }
+    
+    .speaker-text {
+        font-size: 14px;
+    }
+    
+    .panel-header h2 {
+        font-size: 14px;
+    }
+    
+    .phase-title {
+        font-size: 16px;
+    }
+    
+    .phase-tracker {
+        flex-direction: row;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    
+    .phase-item {
+        flex: 1;
+        min-width: 100px;
+        font-size: 11px;
+    }
+}
+
+/* Mobile Phones (max 600px) */
+@media (max-width: 600px) {
+    :root {
+        --space-md: 12px;
+        --space-lg: 16px;
+    }
+    
+    .container {
+        height: auto;
+        min-height: 100vh;
+    }
+    
+    .header {
+        padding: 8px 12px;
+    }
+    
+    .header-content {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+    
+    .header-left h1 {
+        font-size: 16px;
+        margin-bottom: 2px;
+    }
+    
+    .subtitle {
+        font-size: 11px;
+    }
+    
+    .connection-status {
+        padding: 6px 10px;
+        font-size: 11px;
+    }
+    
+    .main-content {
+        grid-template-columns: 1fr;
+        gap: 8px;
+        padding: 8px;
+        overflow: visible;
+        max-width: 100%;
+    }
+    
+    .panel {
+        padding: 12px;
+        border-radius: 8px;
+    }
+    
+    .panel-header {
+        margin-bottom: 12px;
+        padding-bottom: 12px;
+    }
+    
+    .panel-header h2 {
+        font-size: 14px;
+    }
+    
+    .btn-icon {
+        padding: 6px;
+        font-size: 14px;
+    }
+    
+    .conversation-panel {
+        min-height: auto;
+    }
+    
+    .speaker-indicator {
+        padding: 12px;
+        gap: 12px;
+        flex-direction: column;
+    }
+    
+    .speaker-icon {
+        font-size: 28px;
+    }
+    
+    .speaker-text {
+        font-size: 14px;
+    }
+    
+    .chat-messages {
+        min-height: 250px;
+        max-height: 400px;
+        padding: 12px;
+        gap: 8px;
+    }
+    
+    .message {
+        font-size: 13px;
+        padding: 10px;
+        max-width: 98%;
+    }
+    
+    .human-message {
+        border-left-width: 2px;
+    }
+    
+    .ai-message {
+        border-left-width: 2px;
+    }
+    
+    .latency-display {
+        font-size: 11px;
+        padding: 10px;
+    }
+    
+    .welcome-message {
+        padding: 12px;
+        font-size: 13px;
+    }
+    
+    .phase-title {
+        font-size: 14px;
+    }
+    
+    .phase-progress {
+        font-size: 11px;
+    }
+    
+    .phase-tracker {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+    }
+    
+    .phase-item {
+        font-size: 11px;
+        padding: 8px 10px;
+    }
+    
+    .turn-summary {
+        font-size: 11px;
+    }
+    
+    .status-item {
+        font-size: 11px;
+        padding: 8px 0;
+    }
+    
+    .api-link {
+        font-size: 11px;
+        padding: 8px 12px;
+    }
+    
+    .footer {
+        padding: 8px 12px;
+        font-size: 11px;
+    }
+    
+    /* Optimize scrollbar for mobile */
+    ::-webkit-scrollbar {
+        width: 4px;
+        height: 4px;
+    }
+}
+
+/* Very Small Phones (max 400px) */
+@media (max-width: 400px) {
+    .header-left h1 {
+        font-size: 14px;
+    }
+    
+    .phase-tracker {
+        grid-template-columns: 1fr;
+    }
+    
+    .api-links {
+        gap: 6px;
+    }
+    
+    .message {
+        font-size: 12px;
+    }
+    
+    .chat-messages {
+        min-height: 200px;
+    }
+}
+
+/* Dark Mode Support (if user prefers light mode globally) */
+@media (prefers-color-scheme: light) {
+    :root {
+        --primary: #0284c7;
+        --dark: #f8fafc;
+        --dark-lighter: #e2e8f0;
+        --light: #1e293b;
+        --border: #cbd5e1;
+    }
+    
+    body {
+        background: var(--dark);
+        color: var(--light);
+    }
+    
+    .panel {
+        background: #f1f5f9;
+        border-color: var(--border);
+    }
+    
+    .header {
+        background: #f8fafc;
+        border-bottom-color: var(--border);
+    }
+    
+    .footer {
+        background: #f8fafc;
+        border-top-color: var(--border);
+    }
+}
+
+/* Print Styles */
+@media print {
+    .header,
+    .footer,
+    .btn-icon,
+    .api-links {
+        display: none;
+    }
+    
+    .main-content {
+        grid-template-columns: 1fr;
+        gap: 0;
+    }
+    
+    .panel {
+        page-break-inside: avoid;
+        border: 1px solid #ccc;
+    }
+    
+    .chat-messages {
+        overflow: visible;
+        max-height: none;
+    }
+}
