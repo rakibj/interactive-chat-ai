@@ -12,8 +12,8 @@ A real-time voice conversation system with configurable AI personas, advanced in
 - Multi-authority modes (human, AI, default) with profile-based turn-taking
 - Human speaking limit enforcement for controlled conversation dynamics
 - Comprehensive analytics with per-turn metrics logging
-- **REST API + WebSocket streaming** for real-time UI integration
-- **Gradio demo UI** with live phase tracking and speaker status
+- **REST API + WebSocket streaming** for real-time backend integration
+- **Modern HTML UI** with live polling, professional design, and real-time updates
 
 ## Technology Stack
 
@@ -700,7 +700,7 @@ uv run pytest tests/test_signal_parsing.py -v
 | **Integration Tests** | 4 files | 29+ | API endpoints, WebSocket, session management |
 | **E2E Tests** | 3 files | 10+ | Full conversation flows |
 | **Verification** | 2 files | - | Manual verification scripts |
-| **TOTAL** | **16 files** | **114+ tests** | ✅ Automated via pytest |
+| **TOTAL** | **15 files** | **213 tests** | ✅ Automated via pytest |
 
 ### Test Files in `/tests/`
 
@@ -721,10 +721,10 @@ uv run pytest tests/test_signal_parsing.py -v
 - `test_api_endpoints.py` - 29 mocked API endpoint tests
 - `test_phase2_integration.py` - WebSocket streaming tests
 
-**E2E/UI Tests**:
+**E2E/API Tests**:
 - `test_e2e_conversation_flows.py` - 10 complete conversation tests
-- `test_gradio_demo.py` - Gradio UI tests
 - `test_interactive_controls.py` - Interactive control tests
+- `test_websocket_streaming.py` - WebSocket protocol tests
 
 **Configuration**:
 - `conftest.py` - Pytest fixtures and Windows compatibility fixes
@@ -740,14 +740,16 @@ uv run pytest tests/test_signal_parsing.py -v
 
 ### Test Confidence
 
-When all 114 tests pass, you can be confident that:
+When all 213 tests pass, you can be confident that:
 ✅ Authority modes work (human, ai, default)
 ✅ Phase transitions trigger correctly  
-✅ Signal parsing is accurate with 13 edge cases covered
+✅ Signal parsing is accurate with 24 edge cases covered
 ✅ Multi-turn conversations preserve state
 ✅ Safety timeouts and speaking limits work
 ✅ API endpoints return correct responses
 ✅ WebSocket streaming works properly
+✅ Session management and rate limiting work
+✅ Engine integration with API server works
 
 ### Legacy Test Files
 
@@ -763,7 +765,7 @@ uv run python tests/verify_signal_parsing_fix.py
 
 ### Comprehensive Testing Framework
 
-**Purpose**: Event-driven architecture enables bulletproof testing without audio/API dependencies. All 114+ tests passing ensures 100% confidence in production behavior.
+**Purpose**: Event-driven architecture enables bulletproof testing without audio/API dependencies. All 213 tests passing ensures 100% confidence in production behavior.
 
 **Coverage Matrix**:
 
@@ -1481,11 +1483,11 @@ print(event)
 - 🔵 **Active**: Is `current_phase_id`, currently being spoken/processed  
 - ⭕ **Upcoming**: Not in `phases_completed` and not current, future phases
 
-## Modern UI Implementation (February 2026)
+## HTML App UI (Current - February 2026) ✅
 
 ### Overview
 
-Professional web UI with real-time live polling, no-refresh auto-updates, and modern styling. Built with vanilla HTML, CSS, and JavaScript featuring responsive design and professional blue theme.
+Modern web UI replacing Gradio with real-time live polling, no-refresh auto-updates, and professional design. Built with vanilla HTML, CSS, and JavaScript featuring responsive layout and professional blue theme.
 
 ### Architecture
 
@@ -1682,6 +1684,15 @@ Navigate to http://localhost:7860
 - Messages appear in chat automatically
 - Phase progress updates without refresh
 - Turn summary updates after each turn
+
+### Migration from Gradio
+
+**What Changed**:
+- ❌ Removed: `gradio_demo.py`, `run_complete_gradio_app.py`
+- ❌ Removed: `test_gradio_demo.py` (39 tests)
+- ✅ Added: `run_html_app.py`, HTML UI with real-time polling
+- ✅ Simpler architecture: No Gradio dependency, pure HTML/CSS/JS
+- ✅ Better performance: Direct HTTP polling vs Gradio state management
 
 ### Future Improvements
 
