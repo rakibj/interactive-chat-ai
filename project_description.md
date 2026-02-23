@@ -1168,7 +1168,9 @@ acknowledgments=["Okay.", "Noted.", "Got it."]
 - `GET /api/state/phase` - Current phase state with progress
 - `GET /api/state/speaker` - Real-time speaker status (human/ai/silence)
 - `GET /api/conversation/history?limit=50` - Recent turns
+- `GET /api/chat?limit=100` - **NEW** Formatted chat messages (human + AI texts for UI display)
 - `GET /api/state` - Complete state for UI rendering
+- `GET /api/debug/memory` - **NEW** Debug endpoint showing raw conversation memory state
 - `GET /docs` - Swagger UI documentation
 - `GET /redoc` - ReDoc documentation
 
@@ -1178,11 +1180,20 @@ acknowledgments=["Okay.", "Noted.", "Got it."]
 - `PhaseState` - Current phase with progress array
 - `SpeakerStatus` - Active speaker information
 - `Turn` - Single conversation turn with latency
+- `ChatMessage` - **NEW** Single chat message with role, content, index, timestamp
+- `ChatHistory` - **NEW** Complete chat history with messages, statistics, phase/turn info
 - `ConversationState` - Complete state snapshot
 - `HealthResponse` - API health status
 - `ErrorResponse` - Standardized error format
 
-**Phase 1 Test Coverage**: ✅ 24 tests covering all endpoints, error cases, and model validation
+**Phase 1 Test Coverage**: ✅ 50+ tests covering all endpoints, error cases, and model validation
+   - 24 tests for core REST endpoints
+   - 26 tests for Chat API (`test_chat_api.py`)
+     - 6 ChatMessage model tests
+     - 3 ChatHistory model tests
+     - 14 API endpoint behavior tests
+     - 2 integration scenario tests
+     - 3 edge case tests
 
 ---
 
@@ -1502,10 +1513,12 @@ Modern web UI replacing Gradio with real-time live polling, no-refresh auto-upda
    - Custom scrollbars and styling
 
 2. **`public/js/app_live.js`** (250+ lines)
-   - Core polling engine with 750ms intervals
+   - Core polling engine with 1500ms intervals (reduced from 750ms for stability)
    - Hash-based state change detection (efficient, no-op updates)
+   - Chat API integration via `/api/chat` endpoint
    - Intelligent message rendering (adds only new messages)
    - UIManager integration for all DOM updates
+   - Debug mode support via localStorage
    - AI auto-start mode support
    - Comprehensive console logging for debugging
 
@@ -1541,6 +1554,8 @@ Every 750ms:
 - ✅ **Modern design** - Professional blue theme with animations
 - ✅ **All UI sections update** - Phase progress, turn summary, speaker indicator, messages
 - ✅ **AI auto-start ready** - Detects AI-authority profiles and triggers `/api/start`
+- ✅ **UI Stability** - 1500ms polling (reduced from 750ms) minimizes visual disturbance
+- ✅ **Complete Chat Display** - Uses `/api/chat` endpoint for full conversation history
 
 ### Live Polling Features
 
@@ -1550,12 +1565,15 @@ Every 750ms:
 - Only updates DOM when state actually changes
 - Prevents re-rendering same content repeatedly
 
-**Message Rendering**:
+**Message Rendering** (via `/api/chat` endpoint):
 
-- Intelligently adds only new messages to chat
-- Preserves scroll position
-- Animations on new messages (slideIn effect)
+- Fetches complete conversation history formatted for UI
+- Intelligently adds only new messages to avoid DOM conflicts
+- Filters out system messages automatically
+- Displays both human (user) and AI (assistant) messages with proper formatting
+- Preserves scroll position and adds animations to new messages
 - Auto-scrolls to latest message
+- Shows message statistics (human count, AI count, turn info)
 
 **Phase Tracking**:
 
@@ -1581,7 +1599,16 @@ Every 750ms:
 
 - `GET /api/state` - Main polling endpoint
   - Returns: `{phase, speaker, turn_id, history, is_processing}`
-  - Called every 750ms by app_live.js
+  - Called every 1500ms by app_live.js
+  
+- `GET /api/chat?limit=100` - Chat message history endpoint
+  - Returns: `{messages: [ChatMessage], total_messages, human_messages, ai_messages, turn_id, phase_id}`
+  - Called every 1500ms for chat UI rendering
+  - Filters system messages, formats for UI display
+  
+- `GET /api/debug/memory` - Debug endpoint for troubleshooting
+  - Returns: raw conversation memory state for diagnostics
+  - Useful for debugging message storage issues
   
 - `POST /api/start` - AI auto-start trigger
   - Called when AI-authority profile detected
@@ -1595,15 +1622,27 @@ Open DevTools (F12) → Console tab to see real-time logs:
 
 ```
 🚀 Modern Live Chat App initialized (API: http://localhost:8000)
-✅ Modern app ready - polling active every 750ms
-📡 Live polling started (750ms interval)
+✅ Modern app ready - polling active every 1500ms
+📡 Live polling started (1500ms interval)
 🔄 State updated, refreshing UI...
-🔄🔄🔄 RENDER STATE CALLED - state: {...}
-📢 Updating speaker: ai
-📋 Updating phase info: unknown
+📢 Chat: 4 messages (2 user, 2 AI)
+📈 Currently showing 2 visible, API has 4, adding 2 new
+📝 Adding user message 2: "How are you?"
+📝 Adding assistant message 3: "I'm doing great!"
+✅ Chat rendered: 4 total visible messages
+📢 Updating speaker: human
+📋 Updating phase info: part1
 📊 Updating turn summary
 ✅ Phase info call completed
-✅ Turn summary updated
+```
+
+**Enable Debug Mode** (verbose logging):
+
+```javascript
+// In browser console:
+localStorage.setItem('chatAppDebug', 'true')
+// Reload page for detailed API response logging
+localStorage.setItem('chatAppDebug', 'false')  // Disable
 ```
 
 **Dimension Debugging** (Initial load):
@@ -1681,9 +1720,11 @@ Navigate to http://localhost:7860
 **4. Conversation Flow**:
 
 - Speaker indicator changes as AI/human speak
-- Messages appear in chat automatically
+- Messages appear in chat automatically (via `/api/chat` endpoint)
+- Both human and AI responses display in chat UI
 - Phase progress updates without refresh
 - Turn summary updates after each turn
+- Enable debug mode (`localStorage.setItem('chatAppDebug', 'true')`) to see verbose logs
 
 ### Migration from Gradio
 
@@ -1691,6 +1732,12 @@ Navigate to http://localhost:7860
 - ❌ Removed: `gradio_demo.py`, `run_complete_gradio_app.py`
 - ❌ Removed: `test_gradio_demo.py` (39 tests)
 - ✅ Added: `run_html_app.py`, HTML UI with real-time polling
+- ✅ Added: `/api/chat` endpoint for formatted chat messages
+- ✅ Added: `/api/debug/memory` debug endpoint
+- ✅ Added: `tests/test_chat_api.py` with 26 comprehensive tests
+- ✅ Updated: `public/js/app_live.js` with chat API integration and debug mode
+- ✅ Improved: Polling interval from 750ms → 1500ms for UI stability
+- ✅ Fixed: Conflicting render paths (single `/api/chat` source of truth)
 - ✅ Simpler architecture: No Gradio dependency, pure HTML/CSS/JS
 - ✅ Better performance: Direct HTTP polling vs Gradio state management
 

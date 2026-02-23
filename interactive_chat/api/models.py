@@ -358,3 +358,70 @@ class ResetResponse(BaseModel):
                 "timestamp": "2026-02-04T12:34:56.789Z"
             }
         }
+
+
+# ============================================================================
+# Phase 3 Models: Chat API for UI Message Display
+# ============================================================================
+
+
+class ChatMessage(BaseModel):
+    """Single chat message with metadata."""
+    
+    role: str = Field(
+        ...,
+        description="Message sender role: 'user' or 'assistant'",
+        pattern="^(user|assistant|system)$"
+    )
+    content: str = Field(..., description="Message text content")
+    index: int = Field(..., description="Message index in conversation (0-based)")
+    timestamp: Optional[float] = Field(None, description="Unix timestamp when message was added")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "role": "user",
+                "content": "What is the capital of France?",
+                "index": 0,
+                "timestamp": 1707052800.123
+            }
+        }
+
+
+class ChatHistory(BaseModel):
+    """Complete chat history response."""
+    
+    messages: List[ChatMessage] = Field(
+        default_factory=list,
+        description="All chat messages in order"
+    )
+    total_messages: int = Field(..., description="Total message count")
+    turn_id: int = Field(..., description="Current turn ID")
+    phase_id: Optional[str] = Field(None, description="Current phase ID if applicable")
+    human_messages: int = Field(..., description="Count of user messages")
+    ai_messages: int = Field(..., description="Count of assistant messages")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "Hello",
+                        "index": 0,
+                        "timestamp": 1707052800.1
+                    },
+                    {
+                        "role": "assistant",
+                        "content": "Hi there! How can I help?",
+                        "index": 1,
+                        "timestamp": 1707052801.5
+                    }
+                ],
+                "total_messages": 2,
+                "turn_id": 1,
+                "phase_id": "part1",
+                "human_messages": 1,
+                "ai_messages": 1
+            }
+        }

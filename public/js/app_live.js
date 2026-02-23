@@ -13,8 +13,10 @@ class ModernChatApp {
         this.pollingInterval = null;
         this.isAutoStarted = false;
         this.apiBaseUrl = 'http://localhost:8000';
+        this.debugMode = localStorage.getItem('chatAppDebug') === 'true'; // Enable with: localStorage.setItem('chatAppDebug', 'true')
         
         console.log('🚀 Modern Live Chat App initialized (API: ' + this.apiBaseUrl + ')');
+        if (this.debugMode) console.log('🔍 DEBUG MODE ENABLED - Use localStorage.setItem("chatAppDebug", "false") to disable');
         this.init();
     }
     
@@ -63,7 +65,7 @@ class ModernChatApp {
     }
     
     /**
-     * Start live polling - polls every 750ms for state changes
+     * Start live polling - polls every 1500ms for state changes (less aggressive)
      */
     startLivePolling() {
         this.pollingInterval = setInterval(async () => {
@@ -72,9 +74,9 @@ class ModernChatApp {
             } catch (error) {
                 console.warn('⚠️ Poll error:', error.message);
             }
-        }, 750); // 750ms polling interval
+        }, 1500); // 1500ms polling interval - less aggressive for UI stability
         
-        console.log('📡 Live polling started (750ms interval)');
+        console.log('📡 Live polling started (1500ms interval)');
     }
     
     /**
@@ -117,7 +119,7 @@ class ModernChatApp {
     /**
      * Render state to UI - uses UIManager for proper DOM updates
      */
-    renderState(state) {
+    async renderState(state) {
         try {
             console.log('🔄🔄🔄 RENDER STATE CALLED - state:', state);
             
@@ -130,10 +132,11 @@ class ModernChatApp {
                 UIManager.updateSpeakerIndicator(state.speaker.speaker);
             }
             
-            // Update messages from history
-            if (state.history) {
-                this.renderMessages(state.history);
-            }
+            // ⚠️ SKIP renderMessages() - use /api/chat endpoint instead for cleaner rendering
+            // This prevents conflicts between two rendering paths
+            
+            // Update messages from /api/chat endpoint (best source for chat UI)
+            await this.renderChatMessages();
             
             // Update phase info - BASIC
             if (state.phase) {
@@ -217,6 +220,96 @@ class ModernChatApp {
         }
         
         this.lastMessageCount = history.length;
+    }
+    
+    /**
+     * Fetch and render chat messages from /api/chat endpoint
+     * Formats human (user) and AI (assistant) messages for display
+     */
+    async renderChatMessages() {
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/api/chat?limit=100`);
+            if (!response.ok) {
+                console.warn('⚠️ Failed to fetch chat messages:', response.status);
+                return;
+            }
+            
+            const chatData = await response.json();
+            const chatBox = document.getElementById('chat-messages');
+            
+            if (!chatBox) {
+                console.warn('⚠️ Chat box element not found');
+                return;
+            }
+            
+            // Log what we received (verbose in debug mode)
+            if (this.debugMode) {
+                console.log(`📥 [DEBUG] Chat API response:`, chatData);
+            } else {
+                console.log(`📥 Chat: ${chatData.total_messages} messages (${chatData.human_messages} user, ${chatData.ai_messages} AI)`);
+            }
+            
+            // Clear welcome message if we have messages
+            const welcome = chatBox.querySelector('.welcome-message');
+            if (welcome && chatData.total_messages > 0) {
+                if (this.debugMode) console.log('🗑️ Removing welcome message');
+                welcome.remove();
+            }
+            
+            // If no messages, show welcome
+            if (!chatData.messages || chatData.messages.length === 0) {
+                if (!welcome) {
+                    if (this.debugMode) console.log('📭 No messages - showing welcome');
+                    chatBox.innerHTML = `
+                        <div class="welcome-message">
+                            <p>💬 Welcome to Interactive Chat AI</p>
+                            <p>Conversation messages will appear here...</p>
+                        </div>
+                    `;
+                }
+                return;
+            }
+            
+            // IMPORTANT: Only add NEW messages since last render
+            // Count existing messages already in DOM
+            const existingMessages = chatBox.querySelectorAll('.message');
+            const startIndex = existingMessages.length;
+            
+            if (this.debugMode) {
+                console.log(`📊 [DEBUG] Currently ${startIndex} visible, API has ${chatData.messages.length}, adding ${Math.max(0, chatData.messages.length - startIndex)} new`);
+            }
+            
+            // Add only new messages
+            for (let i = startIndex; i < chatData.messages.length; i++) {
+                const msg = chatData.messages[i];
+                
+                if (this.debugMode) {
+                    console.log(`📝 [DEBUG] Adding ${msg.role} message ${i}: "${msg.content.substring(0, 60)}..."`);
+                }
+                
+                if (msg.role === 'user') {
+                    // Human/User message
+                    UIManager.addHumanMessage(msg.content, {
+                        timestamp: msg.timestamp,
+                        index: msg.index
+                    });
+                } else if (msg.role === 'assistant') {
+                    // AI/Assistant message
+                    UIManager.addAIMessage(msg.content, {
+                        timestamp: msg.timestamp,
+                        index: msg.index
+                    });
+                }
+                // System messages are skipped (already filtered by API)
+            }
+            
+            // Log final statistics
+            const finalCount = chatBox.querySelectorAll('.message').length;
+            console.log(`✅ Chat rendered: ${finalCount} total visible messages`);
+        } catch (error) {
+            console.error('❌ Error rendering chat messages:', error);
+            if (this.debugMode) console.error('Stack trace:', error.stack);
+        }
     }
     
     /**

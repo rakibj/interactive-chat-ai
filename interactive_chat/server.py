@@ -24,6 +24,8 @@ from .api.models import (
     ConversationReset,
     ResetResponse,
     WSConnectionRequest,
+    ChatMessage,
+    ChatHistory,
 )
 from .api.session_manager import get_session_manager
 from .api.event_buffer import EventBuffer
@@ -192,6 +194,94 @@ async def get_conversation_history(limit: int = 50):
         "turns": turns,
         "total": len(turns),
     }
+
+
+# ==================== CHAT MESSAGES API ====================
+
+
+@app.get(
+    "/api/chat",
+    response_model=None,
+    summary="Get formatted chat messages (human + AI texts)",
+    tags=["Conversation"],
+)
+async def get_chat_messages(limit: int = 100):
+    """Get conversation messages formatted for UI display.
+    
+    Returns the complete conversation history with human and AI messages
+    formatted and ready for chat UI rendering.
+    
+    Args:
+        limit: Maximum number of messages to return (default: 100, max: 500)
+    
+    Returns:
+        ChatHistory with messages, metadata, and statistics
+    """
+    if not _engine:
+        raise HTTPException(status_code=503, detail="Engine not initialized")
+    
+    # Validate limit
+    if limit < 1:
+        limit = 1
+    if limit > 500:
+        limit = 500
+    
+    # Get messages from conversation memory
+    try:
+        messages_raw = _engine.conversation_memory.get_messages()
+    except AttributeError:
+        messages_raw = []
+    
+    # Filter and format messages (skip system messages for display)
+    all_messages = []  # First, collect all non-system messages
+    human_count = 0
+    ai_count = 0
+    current_time = datetime.now().timestamp()
+    
+    # Process all messages
+    for raw_msg in messages_raw:
+        role = raw_msg.get("role", "system")
+        content = raw_msg.get("content", "")
+        
+        # Skip system messages in display (but they don't count toward limit)
+        if role == "system":
+            continue
+        
+        # Count message types
+        if role == "user":
+            human_count += 1
+        elif role == "assistant":
+            ai_count += 1
+        
+        all_messages.append({
+            "role": role,
+            "content": content,
+        })
+    
+    # Take only the last `limit` messages for display and assign indices
+    messages = []
+    displayed_messages = all_messages[-limit:] if all_messages else []
+    
+    for display_index, msg_dict in enumerate(displayed_messages):
+        chat_msg = ChatMessage(
+            role=msg_dict["role"],
+            content=msg_dict["content"],
+            index=display_index,
+            timestamp=current_time
+        )
+        messages.append(chat_msg)
+    
+    # Get current state info
+    state = _engine.state
+    
+    return ChatHistory(
+        messages=messages,
+        total_messages=len(messages),
+        turn_id=state.turn_id,
+        phase_id=state.active_phase_id,
+        human_messages=human_count,
+        ai_messages=ai_count,
+    ).model_dump()
 
 
 # ==================== FULL STATE ====================
@@ -364,6 +454,36 @@ async def get_limitations():
             phase="phase_3"
         ),
     ]
+
+
+# ==================== DEBUG ENDPOINTS ====================
+
+
+@app.get(
+    "/api/debug/memory",
+    summary="DEBUG: Get raw conversation memory state",
+    tags=["Debug"],
+)
+async def debug_conversation_memory():
+    """DEBUG endpoint: Returns raw state of conversation memory for troubleshooting.
+    
+    This is a development/debug endpoint only. Shows exactly what's stored in memory.
+    """
+    if not _engine:
+        raise HTTPException(status_code=503, detail="Engine not initialized")
+    
+    try:
+        messages_raw = _engine.conversation_memory.get_messages()
+    except AttributeError:
+        messages_raw = []
+    
+    return {
+        "total_raw_messages": len(messages_raw),
+        "messages_raw": messages_raw,
+        "engine_turn_id": _engine.state.turn_id,
+        "engine_active_phase": _engine.state.active_phase_id,
+        "engine_speaker": getattr(_engine.state, 'current_speaker', 'unknown'),
+    }
 
 
 # ==================== WEBSOCKET STREAMING ====================
