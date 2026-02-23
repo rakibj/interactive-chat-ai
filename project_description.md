@@ -82,6 +82,20 @@ interactive-chat-ai/
 - Capturing turn metrics for analytics logging
 - Graceful shutdown management
 - Registering with FastAPI server for API/UI integration (via `set_engine()` call)
+- **NEW**: Phase tracking with signal-based transitions
+
+**Phase System Integration** (NEW):
+
+- Initializes on startup: `active_phase_id`, `phase_index`, `total_phases`, `phases_completed`
+- Signal extraction from LLM responses: `_extract_signals()` parses `<signals>...</signals>` blocks
+- Phase transition logic: `_check_phase_transitions()` matches emitted signals to transition rules
+- Transition execution: `_transition_to_phase()` handles:
+  - Adding previous phase to `phases_completed` list (marks as ✅)
+  - Updating `active_phase_id` and `phase_index` for new phase
+  - Clearing conversation memory for fresh phase start
+  - Injecting phase context into system prompt
+  - Optional AI greeting generation
+- Signal logging: Debug logs show emitted signals (`📡 Signals: ...`) and transitions (`🔀 Phase transition: ...`)
 
 **API Integration** (Phase 3):
 
@@ -89,7 +103,7 @@ interactive-chat-ai/
 - Engine registers itself with server via `set_engine(engine)` function
 - API endpoints now access live engine state: `_engine.state`, `_engine.active_phase_profile`
 - Windows Unicode support added for emoji in console output
-- **Status**: ✅ Working - API returns 200 with real-time engine data
+- **Status**: ✅ Working - API returns 200 with real-time engine data including phase progress
 
 **Event Loop**:
 
@@ -117,6 +131,12 @@ while not shutdown:
 - LLM generation latency
 - Total processing latency
 - Final user and AI transcripts
+
+**Recent Fixes** (February 2026):
+- ✅ Fixed indentation error in signal extraction block (line 598) that prevented app startup
+- ✅ Added phase field initialization to properly track phase progress
+- ✅ Updated phase transition method to mark completed phases
+- ✅ Added signal logging for real-time debugging
 
 ### 2. Event-Driven Core (`core/event_driven_core.py`)
 
@@ -656,9 +676,94 @@ VAD_SPEECH_START event
 
 ## Testing Infrastructure
 
+### Automated Test Execution
+
+All tests are organized in the `/tests/` directory and run via pytest:
+
+```bash
+# Run all tests
+uv run pytest tests/ -v
+
+# Run unit tests only
+uv run pytest tests/test_headless_*.py tests/test_signal*.py -v
+
+# Run specific test file
+uv run pytest tests/test_signal_parsing.py -v
+```
+
+### Test Organization
+
+| Category | Files | Tests | Type |
+|----------|-------|-------|------|
+| **Unit Tests** | 4 files | 65+ | Pure Python, zero dependencies |
+| **Phase Tests** | 2 files | 10+ | Phase transitions and profiles |
+| **Integration Tests** | 4 files | 29+ | API endpoints, WebSocket, session management |
+| **E2E Tests** | 3 files | 10+ | Full conversation flows |
+| **Verification** | 2 files | - | Manual verification scripts |
+| **TOTAL** | **16 files** | **114+ tests** | ✅ Automated via pytest |
+
+### Test Files in `/tests/`
+
+**Unit Tests** (no dependencies):
+- `test_headless_standalone.py` - 16 core logic tests
+- `test_headless_comprehensive.py` - 20 state machine tests
+- `test_signal_parsing.py` - 24 signal parsing tests
+- `test_signals_integration.py` - 5 signal architecture tests
+
+**Phase Tests**:
+- `test_phase_observation_events.py` - 10 phase transition tests
+- `verify_phase_implementation.py` - Manual verification script
+
+**Integration Tests**:
+- `test_app_initialization.py` - 5 infrastructure tests
+- `test_integration_api_live.py` - Live API server test (standalone script)
+- `test_integration_phase_api_live.py` - Phase API simulation (standalone script)
+- `test_api_endpoints.py` - 29 mocked API endpoint tests
+- `test_phase2_integration.py` - WebSocket streaming tests
+
+**E2E/UI Tests**:
+- `test_e2e_conversation_flows.py` - 10 complete conversation tests
+- `test_gradio_demo.py` - Gradio UI tests
+- `test_interactive_controls.py` - Interactive control tests
+
+**Configuration**:
+- `conftest.py` - Pytest fixtures and Windows compatibility fixes
+- `__init__.py` - Package marker
+
+### Test Automation Setup
+
+- **Configuration**: `pyproject.toml` with pytest markers, coverage, and linting config
+- **Documentation**: `tests/README.md` with complete guide and examples
+- **Running tests**: Single command `uv run pytest tests/ -v`
+- **CI/CD ready**: Works with GitHub Actions, GitLab CI, or any pipeline
+- **Windows compatible**: Fixed I/O capture issues with `--capture=no`
+
+### Test Confidence
+
+When all 114 tests pass, you can be confident that:
+✅ Authority modes work (human, ai, default)
+✅ Phase transitions trigger correctly  
+✅ Signal parsing is accurate with 13 edge cases covered
+✅ Multi-turn conversations preserve state
+✅ Safety timeouts and speaking limits work
+✅ API endpoints return correct responses
+✅ WebSocket streaming works properly
+
+### Legacy Test Files
+
+Standalone verification scripts (can still be run manually):
+- `tests/verify_phase_implementation.py` - Verify all phase components exist
+- `tests/verify_signal_parsing_fix.py` - Validate signal parsing accuracy
+
+Or via pytest:
+```bash
+uv run python tests/verify_phase_implementation.py
+uv run python tests/verify_signal_parsing_fix.py
+```
+
 ### Comprehensive Testing Framework
 
-**Purpose**: Event-driven architecture enables bulletproof testing without audio/API dependencies. All 77 tests passing ensures 100% confidence in production behavior.
+**Purpose**: Event-driven architecture enables bulletproof testing without audio/API dependencies. All 114+ tests passing ensures 100% confidence in production behavior.
 
 **Coverage Matrix**:
 
@@ -1297,11 +1402,90 @@ print(event)
 
 ---
 
+## Phase Visuals & UI Implementation (February 2026) ✅ COMPLETE
+
+### Recent Updates - Phase Visuals Complete
+
+**Status**: ✅ All phase display features now working correctly
+
+**Phase Visuals Implementation**:
+- **PhaseVisualsManager** (in `public/js/enhanced_ui.js`, 187 lines)
+  - Renders phase progress with status badges: ✅ (completed), 🔵 (active), ⭕ (upcoming)
+  - Updates phase title and progress counter (e.g., "1/5 phases")
+  - Draws timeline visualization showing completion percentage
+  - Shows phase details in modal on click
+  - Method: `updatePhaseWithDurations(state)` processes phase array from API
+
+- **TurnSummaryManager** (in same file, 187 lines)  
+  - Displays latest turn with speaker, latency, and transcript
+  - Auto-updates as turns progress
+  - Shows "No turns yet" initially
+
+**Backend Phase Tracking** (Now Complete):
+- `ConversationEngine.__init__()` now initializes phase fields:
+  - `active_phase_id`: Current phase ID
+  - `phase_index`: 0-based phase position
+  - `total_phases`: Total number of phases in profile
+  - `phases_completed`: List of completed phase IDs
+  
+- `_transition_to_phase()` updates on phase change:
+  - Marks previous phase as ✅ in `phases_completed`
+  - Calculates phase_index from phase position
+  - Keeps `active_phase_id` in sync
+  - Logs transitions with debug info
+
+**Signal-Based Phase Transitions**:
+- Phases now transition via **signal detection** (not automatically)
+- When AI emits `<signals>{"custom.exam.greeting_complete": {}}</signals>`:
+  1. System detects signal in `_extract_signals()`
+  2. `_check_phase_transitions()` matches signal to transition rules
+  3. `_transition_to_phase()` marks current phase as ✅, sets new phase to 🔵
+  4. Frontend receives updated `phases_completed` list from API
+  5. UI re-renders with correct status badges
+
+**Common Signal Flow** (IELTS Example):
+- Greeting phase: Emits `custom.exam.greeting_complete` → transitions to part1 ✅
+- Part1 phase: Emits `custom.exam.questions_completed` → transitions to part2 ✅  
+- Part2 phase: Emits `custom.exam.monologue_complete` → transitions to part3 ✅
+- Part3 phase: Emits `custom.exam.discussion_complete` → transitions to closing ✅
+
+**Diagnostic Tools Created**:
+- **`public/diagnostic.html`** - Updated with script imports and DOM elements
+  - Loads ui.js, enhanced_ui.js, app_live.js
+  - Has all required hidden elements for manager rendering
+  - Runs 5 diagnostic tests
+  
+- **`public/phase_debug.html`** - Real-time debugging interface
+  - Auto-refreshes every 2 seconds
+  - Shows current phase, progress table with status badges
+  - Displays what signal is needed for next transition
+  - Debug log showing signal emissions and transitions
+
+**API Data Structure** (From `/api/state`):
+```json
+{
+  "phase": {
+    "current_phase_id": "greeting",
+    "phase_index": 0,
+    "total_phases": 5,
+    "progress": [
+      {"id": "greeting", "name": "Greeting", "status": "active", "duration_sec": null},
+      {"id": "part1", "name": "Part 1", "status": "upcoming", "duration_sec": null}
+    ]
+  }
+}
+```
+
+**Status Indicator Meanings**:
+- ✅ **Completed**: In `phases_completed` array, transition already occurred
+- 🔵 **Active**: Is `current_phase_id`, currently being spoken/processed  
+- ⭕ **Upcoming**: Not in `phases_completed` and not current, future phases
+
 ## Modern UI Implementation (February 2026)
 
 ### Overview
 
-Replaced Gradio-based interface with a professional, modern web UI featuring real-time live polling, no-refresh auto-updates, and professional styling. Built with vanilla HTML, CSS, and JavaScript for lightweight performance.
+Professional web UI with real-time live polling, no-refresh auto-updates, and modern styling. Built with vanilla HTML, CSS, and JavaScript featuring responsive design and professional blue theme.
 
 ### Architecture
 

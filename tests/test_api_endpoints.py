@@ -26,6 +26,8 @@ class TestAPIEndpoints:
         """Mock ConversationEngine for testing."""
         engine = Mock()
         engine.shutdown = False
+        engine.shutdown_event = Mock()
+        engine.shutdown_event.is_set.return_value = False
         engine.turn_processing_event = Mock()
         engine.turn_processing_event.is_set.return_value = False
         
@@ -107,7 +109,7 @@ class TestAPIEndpoints:
 
     def test_health_endpoint_when_engine_shutdown(self, client, mock_engine):
         """GET /api/health returns false when engine is shutdown."""
-        mock_engine.shutdown = True
+        mock_engine.shutdown_event.is_set.return_value = True
         
         response = client.get("/api/health")
         

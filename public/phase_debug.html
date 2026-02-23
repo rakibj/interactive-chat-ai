@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Phase Status Debug - Interactive Chat AI</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0f172a;
+            color: #f1f5f9;
+            font-family: monospace;
+            padding: 20px;
+            overflow-y: auto;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #3b82f6;
+            margin: 20px 0;
+        }
+        h2 {
+            color: #60a5fa;
+            margin: 15px 0;
+            font-size: 16px;
+        }
+        .card {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 10px 0;
+        }
+        .status-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 10px 0;
+        }
+        .status-table th, .status-table td {
+            border: 1px solid #334155;
+            padding: 8px;
+            text-align: left;
+        }
+        .status-table th {
+            background: #1e293b;
+            color: #60a5fa;
+        }
+        .status-completed { color: #10b981; }
+        .status-active { color: #3b82f6; }
+        .status-upcoming { color: #8b5cf6; opacity: 0.7; }
+        button {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 10px 0;
+            font-size: 14px;
+        }
+        button:hover { background: #2563eb; }
+        .log {
+            background: #0f172a;
+            border: 1px solid #334155;
+            padding: 10px;
+            border-radius: 4px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-size: 12px;
+            color: #94a3b8;
+            margin: 10px 0;
+        }
+        .log-entry {
+            margin: 3px 0;
+            padding: 3px 0;
+            border-bottom: 1px solid #1e293b;
+        }
+        .log-error { color: #ef4444; }
+        .log-success { color: #10b981; }
+        .log-info { color: #60a5fa; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 Phase Status Debug</h1>
+        
+        <div class="card">
+            <h2>API Status</h2>
+            <button onclick="checkAPI()">Check API Health</button>
+            <div id="api-status"></div>
+        </div>
+        
+        <div class="card">
+            <h2>Current Phase State</h2>
+            <button onclick="fetchState()">Refresh State</button>
+            <table class="status-table" id="state-table" style="display: none;">
+                <tr>
+                    <th>Field</th>
+                    <th>Value</th>
+                </tr>
+                <tr>
+                    <td>Current Phase ID</td>
+                    <td id="current-phase-id">—</td>
+                </tr>
+                <tr>
+                    <td>Phase Index</td>
+                    <td id="phase-index">—</td>
+                </tr>
+                <tr>
+                    <td>Total Phases</td>
+                    <td id="total-phases">—</td>
+                </tr>
+                <tr>
+                    <td>Phase Name</td>
+                    <td id="phase-name">—</td>
+                </tr>
+                <tr>
+                    <td>Phases Completed</td>
+                    <td id="phases-completed">—</td>
+                </tr>
+            </table>
+        </div>
+        
+        <div class="card">
+            <h2>Phase Progress</h2>
+            <table class="status-table" id="progress-table" style="display: none;">
+                <tr>
+                    <th>Phase</th>
+                    <th>Status</th>
+                    <th>Index</th>
+                    <th>Name</th>
+                </tr>
+                <tbody id="progress-tbody"></tbody>
+            </table>
+        </div>
+        
+        <div class="card">
+            <h2>Phase Transition Info</h2>
+            <div id="transition-info"></div>
+        </div>
+        
+        <div class="card">
+            <h2>Debug Log</h2>
+            <button onclick="clearLog()">Clear Log</button>
+            <div class="log" id="debug-log"></div>
+        </div>
+    </div>
+    
+    <script>
+        const apiBaseUrl = 'http://localhost:8000';
+        const logs = [];
+        
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const entry = { timestamp, message, type };
+            logs.unshift(entry);
+            if (logs.length > 50) logs.pop();
+            renderLog();
+        }
+        
+        function renderLog() {
+            const logEl = document.getElementById('debug-log');
+            logEl.innerHTML = logs.map(l => {
+                const className = `log-${l.type}`;
+                return `<div class="log-entry ${className}">[${l.timestamp}] ${l.message}</div>`;
+            }).join('');
+        }
+        
+        function clearLog() {
+            logs.length = 0;
+            renderLog();
+        }
+        
+        async function checkAPI() {
+            try {
+                log('Checking API health...', 'info');
+                const response = await fetch(`${apiBaseUrl}/health`);
+                if (response.ok) {
+                    log('✅ API is healthy', 'success');
+                    document.getElementById('api-status').innerHTML = '<div style="color: #10b981;">✅ API is running</div>';
+                } else {
+                    log(`❌ API returned ${response.status}`, 'error');
+                    document.getElementById('api-status').innerHTML = '<div style="color: #ef4444;">❌ API error</div>';
+                }
+            } catch (e) {
+                log(`❌ API unreachable: ${e.message}`, 'error');
+                document.getElementById('api-status').innerHTML = '<div style="color: #ef4444;">❌ API unreachable</div>';
+            }
+        }
+        
+        async function fetchState() {
+            try {
+                log('Fetching state from /api/state...', 'info');
+                const response = await fetch(`${apiBaseUrl}/api/state`);
+                if (!response.ok) {
+                    log(`❌ State fetch failed: ${response.status}`, 'error');
+                    return;
+                }
+                
+                const state = await response.json();
+                log('✅ State fetched successfully', 'success');
+                
+                // Display state info
+                document.getElementById('state-table').style.display = 'table';
+                document.getElementById('current-phase-id').textContent = state.phase.current_phase_id;
+                document.getElementById('phase-index').textContent = state.phase.phase_index;
+                document.getElementById('total-phases').textContent = state.phase.total_phases;
+                document.getElementById('phase-name').textContent = state.phase.phase_name;
+                document.getElementById('phases-completed').textContent = 
+                    (state.history ? state.history.filter((_, i) => {
+                        const phase = state.phase.progress.find(p => p.id === state.phase.current_phase_id);
+                        return phase;
+                    }).length : 0) + ' turns in current phase';
+                
+                // Display progress
+                log(`Current phase: ${state.phase.current_phase_id} (${state.phase.phase_name})`, 'info');
+                log(`Phase index: ${state.phase.phase_index}/${state.phase.total_phases}`, 'info');
+                
+                document.getElementById('progress-table').style.display = 'table';
+                const tbody = document.getElementById('progress-tbody');
+                tbody.innerHTML = state.phase.progress.map((phase, idx) => {
+                    const statusEmoji = phase.status === 'completed' ? '✅' : 
+                                       phase.status === 'active' ? '🔵' : '⭕';
+                    const statusClass = `status-${phase.status}`;
+                    return `
+                        <tr>
+                            <td>${statusEmoji}</td>
+                            <td class="${statusClass}">${phase.status}</td>
+                            <td>${idx + 1}/${state.phase.total_phases}</td>
+                            <td>${phase.name}</td>
+                        </tr>
+                    `;
+                }).join('');
+                
+                // Check transition requirements
+                const currentPhase = state.phase.current_phase_id;
+                log(`\n═══ Phase Transition Status ═══`, 'info');
+                log(`Current phase: ${currentPhase}`, 'info');
+                
+                document.getElementById('transition-info').innerHTML = `
+                    <p><strong>Current Phase:</strong> ${currentPhase}</p>
+                    <p><strong>To transition:</strong> The AI needs to emit a signal like:</p>
+                    <pre style="background: #0f172a; padding: 10px; border-radius: 4px; overflow-x: auto;">
+&lt;signals&gt;
+{
+  "custom.exam.${getSuggestedSignal(currentPhase)}": {}
+}
+&lt;/signals&gt;</pre>
+                `;
+                
+            } catch (e) {
+                log(`❌ Error fetching state: ${e.message}`, 'error');
+            }
+        }
+        
+        function getSuggestedSignal(phase) {
+            const signals = {
+                'greeting': 'greeting_complete',
+                'part1': 'questions_completed',
+                'part2': 'monologue_complete',
+                'part3': 'discussion_complete',
+                'closing': 'exam_complete'
+            };
+            return signals[phase] || 'phase_complete';
+        }
+        
+        // Auto-fetch on load
+        window.addEventListener('load', () => {
+            log('Page loaded. Click buttons to check status.', 'info');
+            checkAPI();
+            setTimeout(fetchState, 500);
+        });
+        
+        // Auto-refresh every 2 seconds
+        setInterval(fetchState, 2000);
+    </script>
+</body>
+</html>

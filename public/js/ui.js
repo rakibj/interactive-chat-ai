@@ -168,7 +168,26 @@ class UIManager {
             phaseData.progress.forEach((phase, idx) => {
                 const phaseEl = document.createElement('div');
                 phaseEl.className = `phase-item ${phase.status || 'upcoming'}`;
-                phaseEl.textContent = `${phase.id} (${phase.status})`;
+                
+                // Get status badge
+                const statusBadge = {
+                    'completed': '✅',
+                    'active': '🔵',
+                    'upcoming': '⭕'
+                }[phase.status] || '❓';
+                
+                // Display name or ID
+                const displayName = phase.name || phase.id || 'Unknown';
+                let durationText = '';
+                if (phase.duration_sec) {
+                    durationText = `<span class="phase-duration">${phase.duration_sec.toFixed(1)}s</span>`;
+                }
+                
+                phaseEl.innerHTML = `
+                    <span class="phase-status-badge">${statusBadge}</span>
+                    <span class="phase-display-name">${this.escapeHtml(displayName)}</span>
+                    ${durationText}
+                `;
                 phaseTracker.appendChild(phaseEl);
                 if (idx === 0) {
                     console.log('   Created first item:', phaseEl.className, phaseEl.textContent);
@@ -333,3 +352,5 @@ on('connectionChanged', ({ connected, sessionId }) => {
 on('backendStatusChanged', healthy => {
     UIManager.updateBackendStatus(healthy);
 });
+// Export UIManager globally
+window.UIManager = UIManager;

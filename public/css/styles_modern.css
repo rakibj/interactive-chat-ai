@@ -398,3 +398,441 @@ body {
     background: var(--primary);
     color: white;
 }
+
+/* ====== BLUEPRINT 1: Enhanced Phase Visuals ====== */
+
+.phase-timeline {
+    margin: 16px 0;
+}
+
+.timeline-track {
+    position: relative;
+    height: 40px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 20px;
+    overflow: hidden;
+}
+
+.timeline-progress {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    background: linear-gradient(90deg, #3b82f6 0%, #10b981 100%);
+    border-radius: 20px;
+    transition: width 0.5s ease;
+}
+
+.timeline-markers {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 100%;
+    display: flex;
+    align-items: center;
+}
+
+.timeline-marker {
+    position: absolute;
+    width: 36px;
+    height: 36px;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #1e293b;
+    border: 2px solid #3b82f6;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.timeline-marker:hover {
+    transform: translateX(-50%) scale(1.1);
+    background: #3b82f6;
+}
+
+.timeline-marker.completed {
+    background: #10b981;
+    border-color: #10b981;
+}
+
+.timeline-marker.active {
+    background: #3b82f6;
+    border-color: #60a5fa;
+    box-shadow: 0 0 20px rgba(59, 130, 246, 0.5);
+}
+
+.marker-number {
+    color: #f1f5f9;
+    font-weight: 600;
+    font-size: 12px;
+}
+
+/* Phase Item Enhancements */
+.phase-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    transition: all 0.3s ease;
+    cursor: pointer;
+}
+
+.phase-item:hover {
+    background: rgba(59, 130, 246, 0.1);
+}
+
+.phase-item.active {
+    background: rgba(59, 130, 246, 0.2);
+    border-left: 3px solid #3b82f6;
+    padding-left: 10px;
+}
+
+.phase-item.completed {
+    opacity: 0.6;
+}
+
+.phase-item.upcoming {
+    opacity: 0.4;
+}
+
+.phase-status-badge {
+    font-size: 16px;
+}
+
+.phase-display-name {
+    flex: 1;
+    font-weight: 500;
+    color: #e2e8f0;
+}
+
+.phase-duration {
+    color: #10b981;
+    font-size: 12px;
+}
+
+.phase-index {
+    color: #64748b;
+    font-size: 11px;
+    padding: 2px 6px;
+    background: rgba(100, 116, 139, 0.2);
+    border-radius: 3px;
+}
+
+/* Phase Details Modal */
+.phase-details-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.modal-content {
+    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+    border-radius: 12px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+    max-width: 400px;
+    width: 90%;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px;
+    border-bottom: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+.modal-header h3 {
+    margin: 0;
+    color: #f1f5f9;
+    font-size: 18px;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    color: #94a3b8;
+    font-size: 24px;
+    cursor: pointer;
+    transition: color 0.2s;
+}
+
+.modal-close:hover {
+    color: #f1f5f9;
+}
+
+.modal-body {
+    padding: 20px;
+}
+
+.detail-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.detail-row:last-child {
+    border-bottom: none;
+}
+
+.detail-label {
+    color: #94a3b8;
+    font-weight: 500;
+}
+
+.detail-value {
+    color: #3b82f6;
+    font-weight: 600;
+    font-family: var(--font-mono);
+}
+
+/* ====== BLUEPRINT 2: Enhanced Turn Summary ====== */
+
+.turn-summary-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(59, 130, 246, 0.3);
+    user-select: none;
+}
+
+.turn-counter {
+    font-weight: 700;
+    color: #3b82f6;
+    font-size: 14px;
+}
+
+.turn-timestamp {
+    font-size: 12px;
+    color: #94a3b8;
+}
+
+.turn-summary-speaker {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    padding: 8px 12px;
+    background: rgba(59, 130, 246, 0.1);
+    border-radius: 6px;
+}
+
+.speaker-icon {
+    font-size: 16px;
+}
+
+.speaker-name {
+    font-weight: 600;
+    color: #f1f5f9;
+    text-transform: capitalize;
+}
+
+.turn-metrics {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    margin-bottom: 12px;
+    transition: all 0.2s;
+}
+
+.metric {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px;
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 4px;
+    font-size: 13px;
+}
+
+.metric-label {
+    color: #94a3b8;
+    font-weight: 500;
+}
+
+.metric-value {
+    color: #10b981;
+    font-weight: 600;
+    font-family: var(--font-mono);
+}
+
+.turn-transcript {
+    margin-bottom: 12px;
+}
+
+.transcript-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #94a3b8;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+}
+
+.transcript-text {
+    padding: 10px;
+    background: rgba(59, 130, 246, 0.05);
+    border-left: 2px solid #3b82f6;
+    border-radius: 4px;
+    color: #e2e8f0;
+    line-height: 1.5;
+    font-size: 14px;
+    word-break: break-word;
+    max-height: 150px;
+    overflow-y: auto;
+}
+
+.turn-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.btn-detail {
+    flex: 1;
+    padding: 8px 12px;
+    background: rgba(59, 130, 246, 0.2);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    color: #3b82f6;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.btn-detail:hover {
+    background: rgba(59, 130, 246, 0.3);
+    border-color: rgba(59, 130, 246, 0.5);
+}
+
+.turn-summary-empty {
+    text-align: center;
+    padding: 24px;
+}
+
+.empty-icon {
+    font-size: 32px;
+    margin-bottom: 8px;
+}
+
+.empty-text {
+    color: #e2e8f0;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.empty-subtext {
+    color: #94a3b8;
+    font-size: 12px;
+}
+
+/* Detailed Metrics Modal */
+.turn-details-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1001;
+}
+
+.details-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+.detail-group {
+    background: rgba(59, 130, 246, 0.05);
+    padding: 12px;
+    border-radius: 6px;
+    border-left: 2px solid #3b82f6;
+}
+
+.detail-group h4 {
+    margin: 0 0 8px 0;
+    color: #3b82f6;
+    font-size: 12px;
+    text-transform: uppercase;
+    font-weight: 600;
+}
+
+.detail-group.full-width {
+    grid-column: 1 / -1;
+}
+
+.detail-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    font-size: 13px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.detail-item:last-child {
+    border-bottom: none;
+}
+
+.transcript-box {
+    background: #0f172a;
+    border: 1px solid rgba(59, 130, 246, 0.2);
+    border-radius: 4px;
+    padding: 12px;
+    max-height: 200px;
+    overflow-y: auto;
+    color: #e2e8f0;
+    line-height: 1.6;
+    font-size: 13px;
+    font-family: var(--font-mono);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* Scrollbar for transcript boxes */
+.transcript-text::-webkit-scrollbar,
+.transcript-box::-webkit-scrollbar {
+    width: 4px;
+}
+
+.transcript-text::-webkit-scrollbar-track,
+.transcript-box::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 2px;
+}
+
+.transcript-text::-webkit-scrollbar-thumb,
+.transcript-box::-webkit-scrollbar-thumb {
+    background: rgba(59, 130, 246, 0.3);
+    border-radius: 2px;
+}
+
+.transcript-text::-webkit-scrollbar-thumb:hover,
+.transcript-box::-webkit-scrollbar-thumb:hover {
+    background: rgba(59, 130, 246, 0.5);
+}
+
+

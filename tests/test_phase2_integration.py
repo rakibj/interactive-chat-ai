@@ -29,6 +29,8 @@ def mock_engine():
     """Create mock engine for testing."""
     engine = Mock()
     engine.shutdown = False
+    engine.shutdown_event = Mock()
+    engine.shutdown_event.is_set.return_value = False
     engine.phase_manager = Mock()
     engine.phase_manager.current_phase = Mock()
     engine.phase_manager.current_phase.id = "test_phase"

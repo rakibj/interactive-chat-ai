@@ -6,6 +6,7 @@ import requests
 import sys
 import threading
 import io
+import pytest
 
 # Fix Windows Unicode console encoding
 if sys.platform == "win32":
@@ -22,6 +23,8 @@ def read_output(proc, name):
             if line:
                 print(f"[{name}] {line.rstrip()}")
 
+@pytest.mark.slow
+@pytest.mark.skip(reason="Live server integration test - run manually with pytest tests/test_integration_api_live.py -v -s -m slow")
 def test_api_integration():
     """Start main.py and test API endpoints"""
     

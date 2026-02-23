@@ -121,6 +121,9 @@ class ModernChatApp {
         try {
             console.log('🔄🔄🔄 RENDER STATE CALLED - state:', state);
             
+            // Store last state for later reference
+            this.lastState = state;
+            
             // Update speaker indicator
             if (state.speaker) {
                 console.log('📢 Updating speaker:', state.speaker.speaker);
@@ -132,20 +135,31 @@ class ModernChatApp {
                 this.renderMessages(state.history);
             }
             
-            // Update phase info - THIS IS THE KEY PART
+            // Update phase info - BASIC
             if (state.phase) {
                 console.log('🚀🚀🚀 CALLING UIManager.updatePhaseInfo with phase:', state.phase);
                 UIManager.updatePhaseInfo(state.phase);
                 console.log('✅ Phase info call completed');
+                
+                // BLUEPRINT 1: Enhanced phase visuals
+                if (PhaseVisualsManager) {
+                    PhaseVisualsManager.updatePhaseWithDurations(state);
+                    PhaseVisualsManager.drawPhaseTimeline(state);
+                    console.log('✨ Enhanced phase visuals updated');
+                }
             } else {
                 console.warn('⚠️ No phase data in state!');
             }
             
-            // Update turn summary (includes latency)
-            if (state.history) {
-                console.log('📊 Updating turn summary, turns count:', state.history.length);
+            // BLUEPRINT 2: Enhanced turn summary
+            if (state.history && TurnSummaryManager) {
+                console.log('📊 Updating enhanced turn summary, turns count:', state.history.length);
+                TurnSummaryManager.updateTurnSummaryFull(state);
+                console.log('✅ Enhanced turn summary updated');
+            } else if (state.history) {
+                // Fallback to basic summary if managers not available
+                console.log('📊 Updating basic turn summary');
                 UIManager.updateTurnSummary(state.history);
-                console.log('✅ Turn summary updated');
             }
             
             // Trigger auto-start if needed
@@ -193,9 +207,9 @@ class ModernChatApp {
                 const turn = history[i];
                 
                 if (turn.speaker === 'human') {
-                    UIManager.addHumanMessage(turn.message, { latency_ms: turn.latency_ms });
+                    UIManager.addHumanMessage(turn.transcript, { latency_ms: turn.latency_ms });
                 } else if (turn.speaker === 'ai') {
-                    UIManager.addAIMessage(turn.message, { latency_ms: turn.latency_ms });
+                    UIManager.addAIMessage(turn.transcript, { latency_ms: turn.latency_ms });
                 }
             }
             

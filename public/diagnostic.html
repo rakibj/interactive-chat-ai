@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Phase Visuals & Timeline - Diagnostic Test</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0f172a;
+            color: #f1f5f9;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            margin: 20px 0;
+            color: #3b82f6;
+            border-bottom: 2px solid #3b82f6;
+            padding-bottom: 10px;
+        }
+        h2 {
+            margin: 15px 0;
+            font-size: 16px;
+            color: #60a5fa;
+        }
+        .card {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 10px 0;
+        }
+        .check {
+            padding: 8px;
+            margin: 5px 0;
+            border-radius: 4px;
+            font-family: 'Monaco', monospace;
+            font-size: 13px;
+        }
+        .check.pass {
+            background: rgba(16, 185, 129, 0.1);
+            border-left: 3px solid #10b981;
+            color: #10b981;
+        }
+        .check.fail {
+            background: rgba(239, 68, 68, 0.1);
+            border-left: 3px solid #ef4444;
+            color: #ef4444;
+        }
+        .check.warn {
+            background: rgba(245, 158, 11, 0.1);
+            border-left: 3px solid #f59e0b;
+            color: #f59e0b;
+        }
+        .section {
+            margin: 25px 0;
+        }
+        button {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 5px 0;
+        }
+        button:hover {
+            background: #2563eb;
+        }
+        pre {
+            background: #0f172a;
+            border: 1px solid #334155;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .test-result {
+            background: #1e293b;
+            border: 1px solid #334155;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+    </style>
+    
+    <!-- Load required JavaScript modules BEFORE tests run -->
+    <script src="js/ui.js"></script>
+    <script src="js/enhanced_ui.js"></script>
+    <script src="js/app_live.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 Phase Visuals & Timeline - Diagnostic Test</h1>
+        
+        <!-- Hidden elements required by enhanced_ui.js -->
+        <div id="phase-tracker" style="display: none;"></div>
+        <div id="turn-summary" style="display: none;"></div>
+        <div id="phase-title" style="display: none;"></div>
+        <div id="phase-progress" style="display: none;"></div>
+        <div id="speaker-indicator" style="display: none;"></div>
+        <div id="chat-messages" style="display: none;"></div>
+        <div class="phase-section" style="display: none;"></div>
+        
+        <!-- Test 1: Managers Availability -->
+        <div class="section">
+            <h2>✅ Test 1: Manager Classes Available</h2>
+            <div class="card">
+                <button onclick="testManagers()">Run Test</button>
+                <div id="test1-result"></div>
+            </div>
+        </div>
+        
+        <!-- Test 2: DOM Elements -->
+        <div class="section">
+            <h2>✅ Test 2: DOM Elements Present</h2>
+            <div class="card">
+                <button onclick="testDOMElements()">Run Test</button>
+                <div id="test2-result"></div>
+            </div>
+        </div>
+        
+        <!-- Test 3: API Connection -->
+        <div class="section">
+            <h2>✅ Test 3: API Connectivity</h2>
+            <div class="card">
+                <button onclick="testAPIConnection()">Run Test</button>
+                <div id="test3-result"></div>
+            </div>
+        </div>
+        
+        <!-- Test 4: Full Integration -->
+        <div class="section">
+            <h2>✅ Test 4: Full Integration (Render State)</h2>
+            <div class="card">
+                <button onclick="testFullIntegration()">Simulate State Render</button>
+                <div id="test4-result"></div>
+            </div>
+        </div>
+        
+        <!-- Test 5: Live Data -->
+        <div class="section">
+            <h2>✅ Test 5: Live App Data</h2>
+            <div class="card">
+                <button onclick="testLiveData()">Check Current State</button>
+                <div id="test5-result"></div>
+            </div>
+        </div>
+        
+        <!-- Debug Console -->
+        <div class="section">
+            <h2>📝 Debug Console</h2>
+            <div class="card">
+                <pre id="debug-console">Ready for output...</pre>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Utility functions
+        function log(msg) {
+            const console = document.getElementById('debug-console');
+            console.textContent += '\n' + msg;
+            console.scrollTop = console.scrollHeight;
+        }
+        
+        function clearLog() {
+            document.getElementById('debug-console').textContent = '';
+        }
+        
+        function addCheck(result, msg, status = 'pass') {
+            const div = document.createElement('div');
+            div.className = `check ${status}`;
+            div.innerHTML = `<strong>${status.toUpperCase()}:</strong> ${msg}`;
+            result.appendChild(div);
+        }
+        
+        // Test 1: Managers
+        function testManagers() {
+            const result = document.getElementById('test1-result');
+            result.innerHTML = '';
+            clearLog();
+            log('TEST 1: Checking Manager Classes');
+            log('=' .repeat(50));
+            
+            if (typeof PhaseVisualsManager !== 'undefined') {
+                addCheck(result, 'PhaseVisualsManager is available (window.PhaseVisualsManager)', 'pass');
+                log('✅ PhaseVisualsManager found');
+                log('   Methods: ' + Object.getOwnPropertyNames(PhaseVisualsManager).filter(m => typeof PhaseVisualsManager[m] === 'function').join(', '));
+            } else {
+                addCheck(result, 'PhaseVisualsManager NOT found!', 'fail');
+                log('❌ PhaseVisualsManager is undefined');
+                log('   Check: enhanced_ui.js is loaded and PhaseVisualsManager is exported');
+            }
+            
+            if (typeof TurnSummaryManager !== 'undefined') {
+                addCheck(result, 'TurnSummaryManager is available (window.TurnSummaryManager)', 'pass');
+                log('✅ TurnSummaryManager found');
+                log('   Methods: ' + Object.getOwnPropertyNames(TurnSummaryManager).filter(m => typeof TurnSummaryManager[m] === 'function').join(', '));
+            } else {
+                addCheck(result, 'TurnSummaryManager NOT found!', 'fail');
+                log('❌ TurnSummaryManager is undefined');
+            }
+            
+            if (typeof UIManager !== 'undefined') {
+                addCheck(result, 'UIManager is available (from ui.js)', 'pass');
+                log('✅ UIManager found');
+            } else {
+                addCheck(result, 'UIManager NOT found!', 'fail');
+                log('❌ UIManager is undefined');
+            }
+        }
+        
+        // Test 2: DOM Elements
+        function testDOMElements() {
+            const result = document.getElementById('test2-result');
+            result.innerHTML = '';
+            clearLog();
+            log('TEST 2: Checking DOM Elements');
+            log('='.repeat(50));
+            
+            const elements = [
+                { id: 'phase-tracker', name: 'Phase Tracker' },
+                { id: 'turn-summary', name: 'Turn Summary' },
+                { id: 'phase-title', name: 'Phase Title' },
+                { id: 'phase-progress', name: 'Phase Progress' },
+                { id: 'speaker-indicator', name: 'Speaker Indicator' },
+                { id: 'chat-messages', name: 'Chat Messages' }
+            ];
+            
+            elements.forEach(el => {
+                const elem = document.getElementById(el.id);
+                if (elem) {
+                    addCheck(result, `${el.name} (#${el.id}) found`, 'pass');
+                    log(`✅ #${el.id} exists`);
+                } else {
+                    addCheck(result, `${el.name} (#${el.id}) NOT FOUND!`, 'fail');
+                    log(`❌ #${el.id} does not exist`);
+                }
+            });
+            
+            const phaseSection = document.querySelector('.phase-section');
+            if (phaseSection) {
+                addCheck(result, '.phase-section class found', 'pass');
+                log('✅ .phase-section element exists');
+            } else {
+                addCheck(result, '.phase-section class NOT found!', 'fail');
+                log('❌ .phase-section element not found');
+            }
+        }
+        
+        // Test 3: API Connection
+        function testAPIConnection() {
+            const result = document.getElementById('test3-result');
+            result.innerHTML = '';
+            clearLog();
+            log('TEST 3: Checking API Connection');
+            log('='.repeat(50));
+            
+            fetch('http://localhost:8000/api/health')
+                .then(r => {
+                    log(`HTTP ${r.status}: ${r.statusText}`);
+                    if (r.ok) {
+                        addCheck(result, 'API server is running at http://localhost:8000', 'pass');
+                        log('✅ API server responding');
+                        return r.json();
+                    } else {
+                        addCheck(result, `API returned status ${r.status}`, 'fail');
+                        log('❌ API error');
+                    }
+                })
+                .then(data => {
+                    if (data) {
+                        log('Response: ' + JSON.stringify(data, null, 2));
+                    }
+                })
+                .catch(err => {
+                    addCheck(result, `❌ Cannot connect to API: ${err.message}`, 'fail');
+                    log('❌ API connection failed');
+                    log('   Make sure to run: python run_html_app.py');
+                });
+            
+            setTimeout(() => {
+                fetch('http://localhost:8000/api/state')
+                    .then(r => {
+                        if (r.ok) {
+                            addCheck(result, 'GET /api/state endpoint is working', 'pass');
+                            log('✅ /api/state responding');
+                            return r.json();
+                        } else {
+                            addCheck(result, `GET /api/state returned ${r.status}`, 'fail');
+                            log(`❌ /api/state error: ${r.status}`);
+                        }
+                    })
+                    .then(state => {
+                        if (state) {
+                            log('\nAPI Response Structure:');
+                            log(JSON.stringify(state, null, 2));
+                        }
+                    })
+                    .catch(err => {
+                        addCheck(result, `Cannot fetch /api/state: ${err.message}`, 'fail');
+                    });
+            }, 1000);
+        }
+        
+        // Test 4: Full Integration
+        function testFullIntegration() {
+            const result = document.getElementById('test4-result');
+            result.innerHTML = '';
+            clearLog();
+            log('TEST 4: Full Integration Test');
+            log('='.repeat(50));
+            
+            // Simulate a state response
+            const testState = {
+                "phase": {
+                    "current_phase_id": "part1",
+                    "phase_index": 1,
+                    "total_phases": 5,
+                    "phase_name": "Part 1 Questions",
+                    "phase_profile": "ielts_full_exam",
+                    "progress": [
+                        {"id": "greeting", "name": "Greeting", "status": "completed", "duration_sec": 5.2},
+                        {"id": "part1", "name": "Part 1 Questions", "status": "active", "duration_sec": 2.1},
+                        {"id": "part2", "name": "Part 2 Follow-up", "status": "upcoming", "duration_sec": null},
+                        {"id": "part3", "name": "Part 3 Discussion", "status": "upcoming", "duration_sec": null},
+                        {"id": "closing", "name": "Closing", "status": "upcoming", "duration_sec": null}
+                    ]
+                },
+                "speaker": {"speaker": "ai", "timestamp": 1707052800.456, "phase_id": "part1"},
+                "turn_id": 2,
+                "history": [
+                    {
+                        "turn_id": 0,
+                        "speaker": "ai",
+                        "transcript": "Hello, let me start this interview.",
+                        "timestamp": 1707052795.0,
+                        "phase_id": "greeting",
+                        "duration_sec": 5.2,
+                        "latency_ms": 1200
+                    }
+                ],
+                "is_processing": false
+            };
+            
+            log('Simulated API Response:');
+            log(JSON.stringify(testState, null, 2));
+            
+            try {
+                if (!PhaseVisualsManager) {
+                    addCheck(result, 'PhaseVisualsManager not available', 'fail');
+                    log('❌ Cannot test - PhaseVisualsManager undefined');
+                    return;
+                }
+                
+                log('\n📍 Calling PhaseVisualsManager.updatePhaseWithDurations()');
+                PhaseVisualsManager.updatePhaseWithDurations(testState);
+                addCheck(result, 'updatePhaseWithDurations() executed successfully', 'pass');
+                
+                const tracker = document.getElementById('phase-tracker');
+                log(`✅ Phase tracker now has ${tracker.children.length} items`);
+                
+                log('\n📊 Calling PhaseVisualsManager.drawPhaseTimeline()');
+                PhaseVisualsManager.drawPhaseTimeline(testState);
+                addCheck(result, 'drawPhaseTimeline() executed successfully', 'pass');
+                
+                const timeline = document.getElementById('phase-timeline');
+                if (timeline) {
+                    log('✅ Phase timeline created');
+                } else {
+                    log('⚠️  Phase timeline not found in DOM');
+                }
+                
+                if (!TurnSummaryManager) {
+                    log('⚠️  TurnSummaryManager not available');
+                } else {
+                    log('\n📋 Calling TurnSummaryManager.updateTurnSummaryFull()');
+                    if (testState.history && testState.history.length > 0) {
+                        TurnSummaryManager.updateTurnSummaryFull(testState);
+                        addCheck(result, 'updateTurnSummaryFull() executed successfully', 'pass');
+                    }
+                }
+                
+                log('\n✅ Full integration test completed successfully!');
+                addCheck(result, 'All managers working correctly', 'pass');
+            } catch (err) {
+                addCheck(result, `Error during test: ${err.message}`, 'fail');
+                log(`❌ Error: ${err.message}`);
+                log(err.stack);
+            }
+        }
+        
+        // Test 5: Live Data
+        function testLiveData() {
+            const result = document.getElementById('test5-result');
+            result.innerHTML = '';
+            clearLog();
+            log('TEST 5: Checking Live App Data');
+            log('='.repeat(50));
+            
+            if (window.liveApp) {
+                log('✅ window.liveApp found');
+                log('   liveApp properties: ' + Object.keys(window.liveApp).join(', '));
+                
+                if (window.liveApp.lastState) {
+                    addCheck(result, 'Last state is available in window.liveApp', 'pass');
+                    log('📦 Current state:');
+                    log(JSON.stringify(window.liveApp.lastState, null, 2));
+                } else {
+                    addCheck(result, 'No state data yet (app not polled)', 'warn');
+                    log('⚠️  liveApp.lastState is not set yet');
+                    log('   The app may not have fetched state yet. Wait a moment and try again.');
+                }
+            } else {
+                addCheck(result, 'window.liveApp not found', 'fail');
+                log('❌ liveApp is not initialized');
+                log('   Check that app_live.js has loaded and created the ModernChatApp');
+            }
+        }
+        
+        // Initial setup
+        window.addEventListener('load', () => {
+            log('Page loaded. Run tests above to diagnose issues.');
+            log('Available managers: ' + (typeof PhaseVisualsManager !== 'undefined' ? 'PhaseVisualsManager ✅' : 'PhaseVisualsManager ❌'));
+            log('Available managers: ' + (typeof TurnSummaryManager !== 'undefined' ? 'TurnSummaryManager ✅' : 'TurnSummaryManager ❌'));
+        });
+    </script>
+</body>
+</html>

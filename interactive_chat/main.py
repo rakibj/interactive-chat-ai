@@ -137,6 +137,11 @@ class ConversationEngine:
         self.audio_manager = AudioManager()
         self.conversation_memory = ConversationMemory()
         
+        # Calculate total phases if using phase profile
+        total_phases = 0
+        if self.active_phase_profile:
+            total_phases = len(self.active_phase_profile.phases)
+        
         # Initialize Event-Driven Core State
         self.state = SystemState(
             authority=self.profile_settings.get("authority", "human"),
@@ -147,6 +152,11 @@ class ConversationEngine:
             human_speaking_limit_sec=self.profile_settings.get("human_speaking_limit_sec"),
             current_phase_id=current_phase_id,
             phase_profile_name=self.active_phase_profile.name if self.active_phase_profile else None,
+            # Add phase observation tracking
+            active_phase_id=current_phase_id,
+            phase_index=0,
+            total_phases=total_phases,
+            phases_completed=[],
         )
         
         # Event Queue
@@ -396,6 +406,14 @@ class ConversationEngine:
         # Update profile settings
         self.profile_settings = get_profile_settings(None, next_profile)
         
+        # Mark previous phase as completed (if there was one)
+        if self.state.current_phase_id and self.state.current_phase_id not in self.state.phases_completed:
+            self.state.phases_completed.append(self.state.current_phase_id)
+        
+        # Calculate phase index (position in phase list)
+        phase_ids = list(self.active_phase_profile.phases.keys())
+        new_phase_index = phase_ids.index(next_phase_id) if next_phase_id in phase_ids else 0
+        
         # Update state with new profile settings
         self.state.authority = self.profile_settings.get("authority", "human")
         self.state.pause_ms = self.profile_settings["pause_ms"]
@@ -404,6 +422,8 @@ class ConversationEngine:
         self.state.interruption_sensitivity = self.profile_settings["interruption_sensitivity"]
         self.state.human_speaking_limit_sec = self.profile_settings.get("human_speaking_limit_sec")
         self.state.current_phase_id = next_phase_id
+        self.state.active_phase_id = next_phase_id  # Keep these in sync
+        self.state.phase_index = new_phase_index
         
         # Clear phase signals for new phase
         self.phase_emitted_signals.clear()
@@ -435,6 +455,9 @@ class ConversationEngine:
         )
         
         if next_phase:
+            print(f"🔀 Phase transition triggered: {self.state.current_phase_id} → {next_phase}")
+            print(f"   Signals that triggered: {self.phase_emitted_signals}")
+            
             # Emit phase transition event
             self.event_queue.put(Event(
                 EventType.PHASE_TRANSITION,
@@ -443,6 +466,16 @@ class ConversationEngine:
                 {"next_phase": next_phase}
             ))
             return
+        else:
+            # No transition found yet - show what would trigger it
+            possible_transitions = [
+                t for t in self.active_phase_profile.transitions
+                if t.from_phase == self.state.current_phase_id
+            ]
+            if possible_transitions:
+                for t in possible_transitions:
+                    print(f"⏳ Waiting for transition signal: {self.state.current_phase_id} → {t.to_phase}")
+                    print(f"   Needs signal(s): {t.trigger_signals}")
 
         # No transition fired. Check if this is a terminal phase. Only
         # consider shutdown when a signal that belongs to THIS phase has been
@@ -556,6 +589,11 @@ class ConversationEngine:
             
             # Extract emitted signals for phase transitions
             emitted_signals = self._extract_signals(full_response)
+            
+            # Log signals for debugging
+            if emitted_signals:
+                print(f"📡 Signals emitted: {emitted_signals}")
+            
             self._check_phase_transitions(emitted_signals)
             
             if clean_response:
