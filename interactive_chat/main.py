@@ -107,23 +107,29 @@ class ConversationEngine:
         """Initialize ConversationEngine with optional profile override.
         
         Args:
-            profile_key: Profile key to use (overrides ACTIVE_PROFILE from config)
+            profile_key: Profile key to use (overrides ACTIVE_PROFILE and ACTIVE_PHASE_PROFILE from config)
         """
         # Determine if using PhaseProfile or standalone InstructionProfile
         self.active_phase_profile = None
         self.phase_emitted_signals = []  # Track signals for phase transitions
         
+        current_phase_name = None  # Initialize phase name
+        
         # Use provided profile_key if given, otherwise use config
         active_profile = profile_key or ACTIVE_PROFILE
+        active_phase_profile_key = profile_key or ACTIVE_PHASE_PROFILE
         
-        if ACTIVE_PHASE_PROFILE and ACTIVE_PHASE_PROFILE in PHASE_PROFILES:
+        # Check if it's a PhaseProfile (try to load from PHASE_PROFILES)
+        if active_phase_profile_key and active_phase_profile_key in PHASE_PROFILES:
             # Using PhaseProfile mode
-            self.active_phase_profile = PHASE_PROFILES[ACTIVE_PHASE_PROFILE]
+            self.active_phase_profile = PHASE_PROFILES[active_phase_profile_key]
             current_phase_id = self.active_phase_profile.initial_phase
             current_profile = self.active_phase_profile.get_phase(current_phase_id)
             
             if not current_profile:
                 raise ValueError(f"Invalid initial phase: {current_phase_id}")
+            
+            current_phase_name = current_profile.name  # Get the phase display name
             
             print(f"🎭 Starting PhaseProfile: {self.active_phase_profile.name}")
             print(f"🔀 Initial phase: {current_profile.name}")
@@ -154,6 +160,7 @@ class ConversationEngine:
             phase_profile_name=self.active_phase_profile.name if self.active_phase_profile else None,
             # Add phase observation tracking
             active_phase_id=current_phase_id,
+            active_phase_name=current_phase_name,  # Add the phase display name
             phase_index=0,
             total_phases=total_phases,
             phases_completed=[],
@@ -403,12 +410,30 @@ class ConversationEngine:
             print(f"⚠️ Warning: Phase '{next_phase_id}' not found")
             return
         
+        # SAVE current phase messages before clearing
+        if self.state.current_phase_id:
+            try:
+                current_messages = self.conversation_memory.get_messages()
+                # Filter out system messages
+                non_system_messages = [
+                    msg for msg in current_messages
+                    if msg.get("role") != "system"
+                ]
+                self.state.message_history_by_phase[self.state.current_phase_id] = non_system_messages
+                print(f"💾 Saved {len(non_system_messages)} messages from phase '{self.state.current_phase_id}'")
+            except Exception as e:
+                print(f"⚠️ Warning: Could not save phase messages: {e}")
+        
         # Update profile settings
         self.profile_settings = get_profile_settings(None, next_profile)
         
         # Mark previous phase as completed (if there was one)
         if self.state.current_phase_id and self.state.current_phase_id not in self.state.phases_completed:
             self.state.phases_completed.append(self.state.current_phase_id)
+        
+        # CRITICAL: Deduplicate the entire list (remove any accumulated duplicates)
+        # Use dict.fromkeys to preserve order while removing duplicates
+        self.state.phases_completed = list(dict.fromkeys(self.state.phases_completed))
         
         # Calculate phase index (position in phase list)
         phase_ids = list(self.active_phase_profile.phases.keys())
@@ -423,6 +448,7 @@ class ConversationEngine:
         self.state.human_speaking_limit_sec = self.profile_settings.get("human_speaking_limit_sec")
         self.state.current_phase_id = next_phase_id
         self.state.active_phase_id = next_phase_id  # Keep these in sync
+        self.state.active_phase_name = next_profile.name  # Set the phase display name
         self.state.phase_index = new_phase_index
         
         # Clear phase signals for new phase

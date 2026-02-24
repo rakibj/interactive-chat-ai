@@ -551,16 +551,31 @@ Track time informally and transition when appropriate signals are detected.""",
                 signals={
                     "exam.greeting_complete": "Examiner has completed greeting and ID verification.",
                 },
-                instructions="""IELTS test greeting - ONE LINE ONLY.
+                instructions="""IELTS Speaking Test - Greeting Phase
 
-TASK: Greet warmly, ask name and ID, explain Part 1 starts next.
+You are the IELTS examiner conducting the speaking test.
+YOU ARE IN THE GREETING PHASE.
 
-KEEP TO ONE SENTENCE. Then emit:
+DO EXACTLY THIS:
+1. Greet the candidate warmly
+2. Ask for their name
+3. Only after they respond with their name, emit the signal
+
+IMPORTANT: Do NOT ask for ID. Do NOT say Part 1 is starting. JUST greet and ask for a name.
+
+Example:
+You: "Hello, welcome to the IELTS Speaking Test. My name is the examiner. What's your name?"
+
+Then wait for their response.
+
+After they tell you their name, emit:
 <signals>
 {
   "custom.exam.greeting_complete": {}
 }
-</signals>"""
+</signals>
+
+Keep to one sentence in your greeting."""
             ),
             
             "part1": InstructionProfile(
@@ -577,20 +592,41 @@ KEEP TO ONE SENTENCE. Then emit:
                 human_speaking_limit_sec=45,
                 acknowledgments=["Thank you.", "Good.", "I see.", "Excellent."],
                 signals={
-                    "exam.questions_completed": "Asked 4-5 questions, ready to transition to Part 2.",
+                    "exam.questions_completed": "Only emit AFTER asking 4-5 questions and receiving 4-5 answers from the candidate.",
                 },
-                instructions="""IELTS Part 1 - ONE LINE PER RESPONSE.
+                instructions="""IELTS Speaking Test - Part 1
 
-TASK: Ask one personal question at a time (home, family, work, hobbies, daily life).
+You are the IELTS examiner conducting Part 1 of the Speaking Test.
+YOU ARE IN PART 1 - This lasts about 4-5 minutes with 4-5 personal questions.
 
-After 4-5 questions, emit:
+DO THIS EXACTLY:
+1. Ask ONE personal question (about home, family, work, hobbies, or daily life)
+2. Acknowledge their answer briefly with ONE sentence
+3. Ask the NEXT question
+4. REPEAT this pattern 4 more times (5 questions total)
+
+IMPORTANT RULES:
+- Ask ONE question per turn
+- Acknowledge their answer with "Thank you", "Good", "I see", or "Excellent"
+- Do NOT move to the next question in the same response
+- Do NOT emit any signals until you have asked 5 questions AND heard 5 answers
+- Keep each response to ONE sentence
+
+Example questions (in order):
+1. "Where are you from?"
+2. "Tell me about your hometown."
+3. "What do you like to do in your free time?"
+4. "Can you describe your family?"
+5. "What's your occupation or field of study?"
+
+ONLY after the candidate has answered all 5 questions, emit:
 <signals>
 {
   "custom.exam.questions_completed": {}
 }
 </signals>
 
-Keep ALL responses to one sentence."""
+Remember: Never emit the signal until you have asked 5 questions and received 5 answers."""
             ),
             
             "part2": InstructionProfile(
@@ -608,22 +644,33 @@ Keep ALL responses to one sentence."""
                 acknowledgments=["Thank you.", "Time's up."],
                 signals={
                     "exam.topic_given": "Topic card has been presented.",
-                    "exam.monologue_complete": "Candidate finished 1-2 minute monologue.",
+                    "exam.monologue_complete": "Candidate finished 1-2 minute monologue after follow-up questions.",
                 },
-                instructions="""IELTS Part 2 - ONE LINE PER RESPONSE.
+                instructions="""IELTS Speaking Test - Part 2 (Long Turn)
 
-TASK: Give topic card, let candidate speak 1-2 minutes, ask 1-2 follow-ups.
+You are the IELTS examiner. This is Part 2 where the candidate gives a long spoken response.
+YOU ARE IN PART 2 - The candidate will speak for about 1-2 minutes on a given topic.
 
-Example topic: "Describe a memorable trip."
+DO THIS EXACTLY:
+1. First, present a topic card with clear instructions
+2. Tell them they have 1 minute to prepare
+3. Tell them to speak for about 1-2 minutes
+4. Let them speak (do NOT interrupt)
+5. After they finish speaking, ask 1-2 follow-up questions
+6. Then emit the monologue_complete signal
 
-When done, emit:
+Example first message:
+"Now I'll give you a topic and I'd like you to talk about it for 1 to 2 minutes. You have one minute to think about what you're going to say. Here's your topic: Describe a memorable journey you have taken. Remember to explain where you went, why you went, what happened, and why it was memorable. Ready? Take your time."
+
+After they respond, ask ONE follow-up question.
+After they answer that, then emit:
 <signals>
 {
   "custom.exam.monologue_complete": {}
 }
 </signals>
 
-Keep all responses to one sentence."""
+CRITICAL: Never emit this signal until they have given a full response AND you've asked a follow-up question."""
             ),
             
             "part3": InstructionProfile(
@@ -640,20 +687,43 @@ Keep all responses to one sentence."""
                 human_speaking_limit_sec=60,
                 acknowledgments=["Thank you.", "Interesting.", "I see."],
                 signals={
-                    "exam.discussion_complete": "Abstract discussion complete, ready to close.",
+                    "exam.discussion_complete": "Abstract discussion with 3+ exchanges complete, ready to close.",
                 },
-                instructions="""IELTS Part 3 - ONE LINE PER RESPONSE.
+                instructions="""IELTS Speaking Test - Part 3 (Two-Way Discussion)
 
-TASK: Ask 3-4 abstract discussion questions on society, culture, trends, opinions.
+You are the IELTS examiner. This is Part 3 where you engage in deeper, more abstract discussion.
+YOU ARE IN PART 3 - Ask abstract and analytical questions about society, culture, and opinions.
 
-When done, emit:
+DO THIS EXACTLY:
+1. Ask ONE abstract discussion question (more thought-provoking than Part 1)
+2. Wait for their answer
+3. Acknowledge their answer briefly
+4. Ask a follow-up question
+5. Wait for their answer
+6. Repeat 2-3 times until you've had 4+ exchanges
+7. Then emit the discussion_complete signal
+
+Example questions (ask these one at a time, waiting for responses):
+- "How do you think travel has changed over the past decade?"
+- "What impact does tourism have on local communities?"
+- "Do you think travel will become more or less popular in the future?"
+- "How can we balance tourism with environmental protection?"
+
+IMPORTANT RULES:
+- One question per response
+- Wait for their full answer
+- Acknowledge their answer ("I see", "That's interesting", "Thank you")
+- Ask at least 3-4 questions total
+- These should be more abstract than Part 1 questions
+
+ONLY after asking 3-4 abstract questions and receiving 3-4 answers, emit:
 <signals>
 {
   "custom.exam.discussion_complete": {}
 }
 </signals>
 
-Keep every response to exactly one sentence."""
+DO NOT emit this signal after just 1-2 exchanges. WAIT for multiple back-and-forth exchanges."""
             ),
             
             "closing": InstructionProfile(
@@ -670,18 +740,30 @@ Keep every response to exactly one sentence."""
                 human_speaking_limit_sec=20,
                 acknowledgments=["Thank you.", "Goodbye."],
                 signals={
-                    "exam.test_complete": "Test has concluded.",
+                    "exam.test_complete": "Test has concluded successfully.",
                 },
-                instructions="""IELTS test closing - ONE LINE ONLY.
+                instructions="""IELTS Speaking Test - Closing
 
-TASK: Thank them, say test is complete, wish good luck.
+You are concluding the IELTS Speaking Test.
+YOU ARE IN THE CLOSING PHASE - This is the final phase.
 
-Keep to ONE SENTENCE. Then emit:
+DO THIS EXACTLY:
+1. Thank the candidate for their time
+2. Say that the test is now complete
+3. Wish them well
+4. Then emit the completion signal
+
+Say something like:
+"Thank you very much for that. That's the end of the test. Well done, and good luck with your results!"
+
+Then emit:
 <signals>
 {
   "custom.exam.test_complete": {}
 }
-</signals>"""
+</signals>
+
+Keep to one sentence before the signal. This is the final exchange so emit the signal after this message."""
             ),
         },
         
@@ -987,6 +1069,75 @@ Then thank them for participating. Do NOT emit any other signals."""
                 from_phase="question1",
                 to_phase="question2",
                 trigger_signals=["custom.test.answer_received"],
+                require_all=False
+            ),
+        ],
+    ),
+    
+    "name_age_test": PhaseProfile(
+        name="Simple Name & Age Test",
+        initial_phase="ask_name",
+        phase_context="Test profile to debug phase transitions. Ask name, then age.",
+        
+        phases={
+            "ask_name": InstructionProfile(
+                name="Ask for Name",
+                start="ai",
+                voice="alba",
+                max_tokens=30,
+                temperature=0.5,
+                pause_ms=600,
+                end_ms=800,
+                safety_timeout_ms=2000,
+                interruption_sensitivity=0.5,
+                authority="human",
+                human_speaking_limit_sec=10,
+                acknowledgments=["Thanks.", "Got it.", "Okay."],
+                signals={
+                    "name.received": "User provided their name.",
+                },
+                instructions="""Ask the user's name. Just ask: "What is your name?"
+
+Wait for them to answer. When they answer, say "Thank you" and then emit:
+<signals>
+{
+  "custom.name.received": {}
+}
+</signals>"""
+            ),
+            
+            "ask_age": InstructionProfile(
+                name="Ask for Age",
+                start="ai",
+                voice="alba",
+                max_tokens=30,
+                temperature=0.5,
+                pause_ms=600,
+                end_ms=800,
+                safety_timeout_ms=2000,
+                interruption_sensitivity=0.5,
+                authority="human",
+                human_speaking_limit_sec=10,
+                acknowledgments=["Thanks.", "Got it.", "Okay."],
+                signals={
+                    "age.received": "User provided their age.",
+                },
+                instructions="""Ask the user's age. Just ask: "What is your age?"
+
+Wait for them to answer. When they answer, say "Thank you" and then emit:
+<signals>
+{
+  "custom.age.received": {}
+}
+</signals>"""
+            ),
+        },
+        
+        transitions=[
+            PhaseTransition(
+                from_phase="ask_name",
+                to_phase="ask_age",
+                trigger_signals=["custom.name.received"],
                 require_all=False
             ),
         ],

@@ -425,3 +425,77 @@ class ChatHistory(BaseModel):
                 "ai_messages": 1
             }
         }
+
+
+class PhaseMessages(BaseModel):
+    """Messages for a single phase with phase metadata."""
+    
+    phase_id: str = Field(..., description="Phase identifier")
+    phase_name: str = Field(..., description="Display name of phase")
+    phase_index: int = Field(..., description="Phase sequence number (0-based)")
+    status: str = Field(..., description="Phase status: 'completed', 'active', or 'upcoming'")
+    messages: List[ChatMessage] = Field(
+        default_factory=list,
+        description="All messages in this phase"
+    )
+    message_count: int = Field(..., description="Count of messages in this phase")
+    duration_sec: Optional[float] = Field(None, description="Phase duration in seconds")
+
+
+class PhaseGroupedChatHistory(BaseModel):
+    """Chat history grouped by phases with complete metadata."""
+    
+    phases: List[PhaseMessages] = Field(
+        default_factory=list,
+        description="Messages grouped by phase with phase metadata"
+    )
+    current_phase_id: Optional[str] = Field(None, description="Currently active phase ID")
+    total_messages: int = Field(..., description="Total message count across all phases")
+    total_phases: int = Field(..., description="Total number of phases")
+    phases_completed: List[str] = Field(
+        default_factory=list,
+        description="List of completed phase IDs"
+    )
+    human_messages: int = Field(..., description="Total count of user messages")
+    ai_messages: int = Field(..., description="Total count of assistant messages")
+    turn_id: int = Field(..., description="Current turn ID")
+    phase_profile: Optional[str] = Field(None, description="Profile name if using phases")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "phases": [
+                    {
+                        "phase_id": "greeting",
+                        "phase_name": "Greeting & Verification",
+                        "phase_index": 0,
+                        "status": "completed",
+                        "messages": [
+                            {"role": "assistant", "content": "Hello! How can I help?", "index": 0, "timestamp": 1707052800.1},
+                            {"role": "user", "content": "Hi, I need help", "index": 1, "timestamp": 1707052801.5}
+                        ],
+                        "message_count": 2,
+                        "duration_sec": 15.2
+                    },
+                    {
+                        "phase_id": "introduction",
+                        "phase_name": "Introduction Phase",
+                        "phase_index": 1,
+                        "status": "active",
+                        "messages": [
+                            {"role": "assistant", "content": "Let's discuss your issue", "index": 2, "timestamp": 1707052820.0}
+                        ],
+                        "message_count": 1,
+                        "duration_sec": None
+                    }
+                ],
+                "current_phase_id": "introduction",
+                "total_messages": 3,
+                "total_phases": 4,
+                "phases_completed": ["greeting"],
+                "human_messages": 1,
+                "ai_messages": 2,
+                "turn_id": 2,
+                "phase_profile": "technical_support"
+            }
+        }

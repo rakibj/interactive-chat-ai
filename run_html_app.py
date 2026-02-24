@@ -26,6 +26,12 @@ def start_static_server():
         def __init__(self, *args, **kwargs):
             super().__init__(*args, directory=str(public_dir), **kwargs)
         
+        def do_GET(self):
+            # Serve dashboard.html for root path
+            if self.path == "/" or self.path == "":
+                self.path = "/dashboard.html"
+            super().do_GET()
+        
         def log_message(self, format, *args):
             # Reduce log noise
             if "GET" not in format:
@@ -66,20 +72,31 @@ def main():
     print("="*60)
     
     try:
-        # Import after setting up environment
+        # Import config first to check profiles
+        from interactive_chat.config import PHASE_PROFILES, INSTRUCTION_PROFILES
         from interactive_chat.main import ConversationEngine
-        from interactive_chat.config import PHASE_PROFILES, get_profile_settings
         from interactive_chat.server import set_engine
         
-        # Load profile
+        # Get the profile key
         profile_key = args.profile
-        profile_settings = get_profile_settings(profile_key)
         
-        print(f"\n[PROFILE] {profile_settings['name']}")
-        print(f"[AUTHORITY] {profile_settings.get('authority', 'human')}")
-        print(f"[START] {profile_settings.get('start', 'human')}")
+        # Print info about which profile is being used
+        if profile_key in PHASE_PROFILES:
+            phase_profile = PHASE_PROFILES[profile_key]
+            print(f"\n[PROFILE] {phase_profile.name} (PhaseProfile)")
+            print(f"[PHASES] {', '.join(phase_profile.phases.keys())}")
+            print(f"[INITIAL PHASE] {phase_profile.initial_phase}")
+        elif profile_key in INSTRUCTION_PROFILES:
+            from interactive_chat.config import get_profile_settings
+            profile_settings = get_profile_settings(profile_key)
+            print(f"\n[PROFILE] {profile_settings['name']}")
+            print(f"[AUTHORITY] {profile_settings.get('authority', 'human')}")
+            print(f"[START] {profile_settings.get('start', 'human')}")
+        else:
+            raise ValueError(f"Unknown profile: {profile_key}. Available: {list(PHASE_PROFILES.keys()) + list(INSTRUCTION_PROFILES.keys())}")
         
-        # Initialize engine
+        # Initialize engine with the profile_key
+        # The engine will use this to determine PhaseProfile vs InstructionProfile mode
         print("\n[INIT] Initializing ConversationEngine...")
         engine = ConversationEngine(profile_key=profile_key)
         
@@ -107,14 +124,20 @@ def main():
         print("\n" + "="*60)
         print("SERVICES STARTED")
         print("="*60)
-        print("[INFO] Web Interface: http://localhost:7860")
+        print("[INFO] Web Interface: http://localhost:7860 (Dashboard)")
         print("[INFO] API Server:    http://localhost:8000")
         print("[INFO] Swagger UI:    http://localhost:8000/docs")
+        print("[INFO] Chat Phases:   GET /api/chat/phases")
+        print("\n[FEATURES]")
+        print("   - Phase-grouped chat history")
+        print("   - Live performance metrics")
+        print("   - Call progress tracking")
+        print("   - Real-time message updates (1.5s polling)")
         print("\n[TIPS]")
         print("   - Open http://localhost:7860 in your browser")
         print("   - WebSocket connects automatically")
         print("   - REST API available for custom clients")
-        print("   - All 247 tests passing!")
+        print("   - All tests passing!")
         print("="*60 + "\n")
         
         # Open browser if requested

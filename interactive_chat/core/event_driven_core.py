@@ -72,11 +72,15 @@ class SystemState:
     
     # Phase Observation Tracking (NEW)
     active_phase_id: Optional[str] = None              # Current phase ID
+    active_phase_name: Optional[str] = None            # Current phase display name
     phase_index: int = 0                               # 0-based index in phase list
     total_phases: int = 0                              # Total phases in PhaseProfile
     phases_completed: List[str] = field(default_factory=list)  # ["greeting", "part1"]
     phase_progress: Dict[str, Dict] = field(default_factory=dict)  # {"greeting": {"status": "completed", "duration_sec": 45.2}}
     last_phase_transition_reason: Optional[str] = None # Signal that triggered transition
+    
+    # Message History by Phase (preserves complete chat across phase transitions)
+    message_history_by_phase: Dict[str, List[Dict]] = field(default_factory=dict)  # {"greeting": [{role, content}, ...], "part1": [...]}
     
     # Speaker Tracking (NEW)
     current_speaker: str = "silence"  # "human", "ai", "silence"

@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>AI Conversation Dashboard</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#3b83f7",
+                        "background-light": "#f1f5f9",
+                        "background-dark": "#0f172a",
+                    },
+                    fontFamily: {
+                        "display": ["Lexend", "sans-serif"]
+                    },
+                    borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "2xl": "1rem", "full": "9999px"},
+                    animation: {
+                        'pulse-fast': 'pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'wave': 'wave 1.2s ease-in-out infinite',
+                    },
+                    keyframes: {
+                        wave: {
+                            '0%, 100%': { height: '0.5rem' },
+                            '50%': { height: '1.5rem' },
+                        }
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+        
+        /* Ensure scrollable containers have proper dimensions */
+        html, body {
+            height: 100%;
+            width: 100%;
+        }
+        
+        body {
+            display: flex !important;
+            flex-direction: column !important;
+            overflow: hidden !important;
+        }
+        
+        header {
+            flex-shrink: 0;
+        }
+        
+        main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            min-height: 0;
+        }
+        
+        main > section {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            min-height: 0;
+        }
+        
+        main > section:nth-of-type(1) {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;  /* Hide scrollable content overflow, but allow inner elements */
+            min-height: 0;
+            position: relative;  /* Allow z-index context */
+        }
+        
+        #messages-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            overflow-x: hidden;
+            will-change: scroll-position;
+            min-height: 0;
+        }
+        
+        /* Status bar and phase indicator get natural height */
+        main > section:nth-of-type(1) > div:last-of-type {
+            flex-shrink: 0;
+        }
+        
+        #phase-change-indicator {
+            position: fixed;  /* Fixed position, never clipped */
+            top: 70px;  /* Below header */
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;  /* Very high z-index */
+            max-width: 90%;
+            background-color: #dbeafe;  /* Solid blue background */
+            color: #1e40af;  /* Dark blue text */
+            border-bottom: 2px solid #3b82f6;
+            padding: 12px 24px;
+            border-radius: 6px;
+            display: none;  /* Hidden by default */
+            flex-direction: row;
+            align-items: center;
+            gap: 12px;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        
+        #phase-change-indicator:not(.hidden) {
+            display: flex !important;
+            animation: slideDown 0.3s ease-out;
+        }
+        
+        /* Dark mode */
+        #phase-change-indicator.dark {
+            background-color: #1e3a8a;
+            color: #93c5fd;
+            border-bottom-color: #1e40af;
+        }
+        
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateX(-50%) translateY(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(-50%) translateY(0);
+            }
+        }
+        
+        /* Right panel scrollable content area */
+        main > section:nth-of-type(2) {
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        main > section:nth-of-type(2) > div:first-child {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+            min-height: 0;
+        }
+        
+    </style>
+  </head>
+<body class="bg-background-light dark:bg-background-dark font-display text-slate-900 dark:text-slate-100 h-screen flex flex-col overflow-hidden">
+<header class="flex items-center justify-between px-6 py-4 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 shadow-sm z-20 flex-shrink-0">
+<div class="flex items-center gap-3">
+<button class="p-2 -ml-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400">
+<span class="material-symbols-outlined">arrow_back</span>
+</button>
+<h1 class="text-xl font-bold tracking-tight">AI Call Dashboard</h1>
+</div>
+<div class="flex items-center gap-4">
+<div class="hidden sm:flex items-center gap-2 text-sm text-slate-500">
+<span class="material-symbols-outlined text-lg">schedule</span>
+<span class="font-mono font-medium" id="call-duration">00:00</span>
+</div>
+<div class="flex items-center gap-1.5 bg-red-50 dark:bg-red-900/20 px-3 py-1.5 rounded-full border border-red-100 dark:border-red-900/50">
+<span class="relative flex h-2 w-2">
+<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+<span class="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+</span>
+<span class="text-xs font-semibold text-red-600 dark:text-red-400">Live</span>
+</div>
+<button class="bg-red-100 hover:bg-red-200 dark:bg-red-900/30 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400 px-4 py-2 rounded-lg text-sm font-semibold transition-colors">
+            End Call
+        </button>
+</div>
+</header>
+<main class="flex-1 flex flex-col md:flex-row overflow-hidden">
+<section class="flex-1 flex flex-col border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
+<div id="phase-change-indicator" class="hidden bg-blue-50 dark:bg-blue-900/20 border-b border-blue-200 dark:border-blue-900/50 px-6 py-3 flex items-center gap-3 text-blue-700 dark:text-blue-300 text-sm font-semibold flex-shrink-0">
+  <span class="material-symbols-outlined animate-bounce">arrow_downward</span>
+  <span id="phase-change-text">Transitioning to new phase...</span>
+</div>
+<div id="debug-console" class="hidden fixed bottom-4 right-4 bg-slate-900 text-slate-100 p-3 rounded-lg text-xs font-mono max-w-sm max-h-48 overflow-y-auto border border-slate-700 z-50 shadow-lg">
+  <!-- Debug messages will appear here -->
+</div>
+<div id="messages-container" class="flex-1 overflow-y-auto overflow-x-hidden p-6 space-y-6 scroll-smooth">
+<!-- Messages will be populated here -->
+</div>
+<div class="flex-shrink-0 p-4 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+<div class="flex items-center justify-between gap-4 px-2 py-1">
+<div class="flex items-center gap-3">
+<div class="relative flex h-3 w-3">
+<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+<span class="relative inline-flex rounded-full h-3 w-3 bg-primary"></span>
+</div>
+<div class="flex flex-col">
+<span class="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Current Status</span>
+<span class="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2" id="speaker-status">
+                    Listening...
+                </span>
+</div>
+</div>
+<div class="flex items-end justify-center gap-1 h-8 w-24">
+<div class="w-1.5 bg-primary/40 rounded-full animate-wave [animation-duration:1.2s]"></div>
+<div class="w-1.5 bg-primary/60 rounded-full animate-wave [animation-duration:0.9s]"></div>
+<div class="w-1.5 bg-primary rounded-full animate-wave [animation-duration:1.4s]"></div>
+<div class="w-1.5 bg-primary/60 rounded-full animate-wave [animation-duration:1.1s]"></div>
+<div class="w-1.5 bg-primary/40 rounded-full animate-wave [animation-duration:1.3s]"></div>
+</div>
+</div>
+</div>
+</section>
+<section class="w-full md:w-[400px] lg:w-[450px] bg-background-light dark:bg-background-dark flex flex-col overflow-hidden flex-shrink-0">
+<!-- Scrollable content area -->
+<div class="flex-1 overflow-y-auto overflow-x-hidden p-6 space-y-6">
+<!-- Live Performance Card -->
+<div class="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700 flex-shrink-0">
+<div class="flex items-center justify-between mb-6">
+<h2 class="text-lg font-bold text-slate-800 dark:text-white">Live Performance</h2>
+<span class="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wider">Optimal</span>
+</div>
+<div class="grid grid-cols-2 gap-4">
+<div class="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-xl border border-slate-100 dark:border-slate-700">
+<div class="flex items-center gap-2 mb-2 text-slate-500 dark:text-slate-400">
+<span class="material-symbols-outlined text-lg">speed</span>
+<span class="text-xs font-semibold uppercase tracking-wider">Latency</span>
+</div>
+<div class="text-2xl font-bold text-slate-900 dark:text-white font-mono" id="latency-display">1.3s</div>
+</div>
+<div class="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-xl border border-slate-100 dark:border-slate-700">
+<div class="flex items-center gap-2 mb-2 text-slate-500 dark:text-slate-400">
+<span class="material-symbols-outlined text-lg">sentiment_satisfied</span>
+<span class="text-xs font-semibold uppercase tracking-wider">Messages</span>
+</div>
+<div class="text-2xl font-bold text-slate-900 dark:text-white" id="message-count">0</div>
+</div>
+<div class="col-span-2 bg-primary/5 dark:bg-primary/10 p-5 rounded-xl border border-primary/10 dark:border-primary/20 relative overflow-hidden">
+<div class="absolute right-0 top-0 p-3 opacity-10">
+<span class="material-symbols-outlined text-6xl text-primary">graphic_eq</span>
+</div>
+<div class="relative z-10">
+<div class="flex items-center gap-2 mb-1 text-primary">
+<span class="relative flex h-2.5 w-2.5">
+<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+<span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-primary"></span>
+</span>
+<span class="text-xs font-bold uppercase tracking-wider">Speaker</span>
+</div>
+<div class="text-xl font-bold text-slate-900 dark:text-white mt-2" id="current-speaker">Listening</div>
+<div class="w-full bg-white dark:bg-slate-900 h-1.5 rounded-full mt-4 overflow-hidden">
+<div class="bg-primary h-full w-[70%] animate-pulse"></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+
+<!-- Call Progress Card -->
+<div class="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700 flex-shrink-0">
+<div class="flex items-center justify-between mb-6">
+<h2 class="text-lg font-bold text-slate-800 dark:text-white">Call Progress</h2>
+<div class="text-xs font-medium text-slate-500" id="phase-progress">Step 1 of 1</div>
+</div>
+<div class="relative pl-4 space-y-0" id="progress-container">
+<!-- Progress items will be populated here -->
+</div>
+</div>
+</div>  <!-- Close scrollable container -->
+</section>
+</main>
+
+<script>
+class DashboardApp {
+    constructor(apiBaseUrl = "http://localhost:8000") {
+        this.apiBaseUrl = apiBaseUrl;
+        this.pollingInterval = 1500;
+        this.lastMessageCount = 0;
+        this.currentPhaseId = null;
+        this.lastPhaseChangeTime = 0;
+        this.callStartTime = Date.now();
+        this.startPolling();
+        this.startTimer();
+    }
+
+    startTimer() {
+        setInterval(() => {
+            const elapsed = Math.floor((Date.now() - this.callStartTime) / 1000);
+            const minutes = Math.floor(elapsed / 60);
+            const seconds = elapsed % 60;
+            document.getElementById("call-duration").textContent = 
+                `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+        }, 1000);
+    }
+
+    async fetchPhaseGroupedMessages() {
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/api/chat/phases`);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+            
+            // Debug: Log API response structure
+            console.log("📡 API Response:", {
+                total_phases: data.total_phases,
+                total_messages: data.total_messages,
+                phases_completed: data.phases_completed,
+                num_phases_in_response: data.phases?.length || 0,
+                current_phase_id: data.current_phase_id
+            });
+            
+            // Debug: Log each phase's message count
+            if (data.phases) {
+                for (const phase of data.phases) {
+                    console.log(`  Phase '${phase.phase_id}' (${phase.status}): ${phase.messages?.length || 0} messages`);
+                }
+            }
+            
+            return data;
+        } catch (error) {
+            console.error("Failed to fetch messages:", error);
+            return null;
+        }
+    }
+
+    async fetchState() {
+        try {
+            const response = await fetch(`${this.apiBaseUrl}/api/state`);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            return await response.json();
+        } catch (error) {
+            console.error("Failed to fetch state:", error);
+            return null;
+        }
+    }
+
+    renderMessages(data) {
+        const container = document.getElementById("messages-container");
+        
+        if (!data || !data.phases || data.phases.length === 0) {
+            container.innerHTML = '<div class="text-center text-slate-500 py-8">No messages yet...</div>';
+            return;
+        }
+
+        // Detect phase change
+        const activePhase = data.phases.find(p => p.status === "active");
+        if (activePhase) {
+            const phaseChanged = this.currentPhaseId !== activePhase.phase_id;
+            console.log(`📊 Phase Check: current="${this.currentPhaseId}", active="${activePhase.phase_id}", changed=${phaseChanged}`);
+            
+            if (phaseChanged) {
+                console.log(`🔄 Phase Changed: ${this.currentPhaseId} → ${activePhase.phase_id}`);
+                this.currentPhaseId = activePhase.phase_id;
+                this.lastPhaseChangeTime = Date.now();
+                console.log(`📢 Showing phase change indicator for: ${activePhase.phase_name}`);
+                this.showPhaseChangeIndicator(activePhase.phase_name);
+            }
+        } else {
+            console.warn("⚠️ No active phase found in API response");
+        }
+
+        let html = "";
+        const allMessages = [];
+        const seenMessageIds = new Set();  // Track messages to prevent duplicates
+
+        // Collect all messages with phase info and deduplicate
+        for (const phase of data.phases) {
+            for (const msg of phase.messages) {
+                // Create unique ID for message to detect duplicates
+                const msgId = `${phase.phase_id}|${msg.role}|${msg.content}|${msg.index}`;
+                
+                if (!seenMessageIds.has(msgId)) {
+                    seenMessageIds.add(msgId);
+                    allMessages.push({ 
+                        ...msg, 
+                        phase_id: phase.phase_id, 
+                        phase_name: phase.phase_name, 
+                        phase_status: phase.status,
+                        msgId: msgId
+                    });
+                }
+            }
+        }
+
+        console.log(`📊 Rendering ${allMessages.length} messages from ${data.phases.length} phases`);
+        for (const phase of data.phases) {
+            console.log(`  Phase: ${phase.phase_id} (${phase.status}) = ${phase.messages.length} messages`);
+        }
+
+        // Find phase transition points
+        let currentPhaseId = null;
+        for (let i = 0; i < allMessages.length; i++) {
+            const msg = allMessages[i];
+            
+            // Add phase divider if phase changed
+            if (msg.phase_id !== currentPhaseId) {
+                currentPhaseId = msg.phase_id;
+                const phaseStatus = data.phases.find(p => p.phase_id === currentPhaseId)?.status || "active";
+                
+                html += `
+                    <div class="flex items-center gap-4 my-8 opacity-70">
+                        <div class="h-px bg-slate-200 dark:bg-slate-700 flex-1"></div>
+                        <div class="text-xs font-bold text-slate-400 uppercase tracking-widest bg-slate-50 dark:bg-slate-800 px-3 py-1 rounded-full border border-slate-100 dark:border-slate-700">
+                            ${msg.phase_name} ${phaseStatus !== "active" ? "Complete" : "Active"}
+                        </div>
+                        <div class="h-px bg-slate-200 dark:bg-slate-700 flex-1"></div>
+                    </div>
+                `;
+
+                // Show phase status indicator if not completed
+                if (phaseStatus === "active") {
+                    html += `
+                        <div class="flex justify-center my-6">
+                            <div class="bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 px-4 py-2 rounded-full text-xs font-semibold flex items-center gap-2 border border-blue-100 dark:border-blue-800/50">
+                                <span class="material-symbols-outlined text-sm">info</span>
+                                ${msg.phase_name} Active
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+
+            // Render message
+            const isUser = msg.role === "user";
+            const timeStr = new Date(msg.timestamp * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+            
+            if (isUser) {
+                html += `
+                    <div class="flex gap-4 max-w-3xl ml-auto flex-row-reverse">
+                        <div class="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center shrink-0 mt-1 border border-slate-200 dark:border-slate-700">
+                            <span class="material-symbols-outlined text-slate-500 text-xl">person</span>
+                        </div>
+                        <div class="flex flex-col gap-1.5 items-end max-w-[80%]">
+                            <div class="flex items-baseline gap-2 flex-row-reverse">
+                                <span class="text-sm font-bold text-slate-900 dark:text-white">You</span>
+                                <span class="text-xs text-slate-400">${timeStr}</span>
+                            </div>
+                            <div class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 p-4 rounded-2xl rounded-tr-none shadow-sm">
+                                <p class="text-base leading-relaxed">${this.escapeHtml(msg.content)}</p>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                html += `
+                    <div class="flex gap-4 max-w-3xl">
+                        <div class="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-1 border border-primary/20">
+                            <span class="material-symbols-outlined text-primary text-xl">smart_toy</span>
+                        </div>
+                        <div class="flex flex-col gap-1.5 max-w-[80%]">
+                            <div class="flex items-baseline gap-2">
+                                <span class="text-sm font-bold text-slate-900 dark:text-white">AI Agent</span>
+                                <span class="text-xs text-slate-400">${timeStr}</span>
+                            </div>
+                            <div class="bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 p-4 rounded-2xl rounded-tl-none border border-slate-100 dark:border-slate-700">
+                                <p class="text-base leading-relaxed">${this.escapeHtml(msg.content)}</p>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        // Add typing indicator if still speaking
+        if (data.phases.length > 0 && data.phases.some(p => p.status === "active" && p.message_count > 0)) {
+            html += `
+                <div class="flex gap-4 max-w-3xl opacity-50">
+                    <div class="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-1 border border-primary/20">
+                        <span class="material-symbols-outlined text-primary text-xl">smart_toy</span>
+                    </div>
+                    <div class="flex items-center h-10">
+                        <div class="flex gap-1 bg-slate-50 dark:bg-slate-800 px-4 py-3 rounded-2xl rounded-tl-none">
+                            <span class="w-2 h-2 rounded-full bg-slate-400 animate-bounce"></span>
+                            <span class="w-2 h-2 rounded-full bg-slate-400 animate-bounce [animation-delay:0.2s]"></span>
+                            <span class="w-2 h-2 rounded-full bg-slate-400 animate-bounce [animation-delay:0.4s]"></span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        container.innerHTML = html;
+        this.lastMessageCount = allMessages.length;
+        document.getElementById("message-count").textContent = allMessages.length;
+        
+        // Auto-scroll to bottom
+        this.scrollToBottom();
+    }
+
+    showPhaseChangeIndicator(phaseName) {
+        console.log(`✨ showPhaseChangeIndicator called with: "${phaseName}"`);
+        
+        const indicator = document.getElementById("phase-change-indicator");
+        const text = document.getElementById("phase-change-text");
+        
+        if (!indicator) {
+            console.error("❌ phase-change-indicator element not found in DOM!");
+            return;
+        }
+        
+        if (!text) {
+            console.error("❌ phase-change-text element not found in DOM!");
+            return;
+        }
+        
+        console.log(`  Before: indicator.className = "${indicator.className}"`);
+        text.textContent = `Now entering: ${phaseName.toUpperCase()}`;
+        indicator.classList.remove("hidden");
+        console.log(`  After remove: indicator.className = "${indicator.className}"`);
+        console.log(`  Display computed: ${window.getComputedStyle(indicator).display}`);
+        console.log(`  Position: ${window.getComputedStyle(indicator).position}`);
+        console.log(`  Z-index: ${window.getComputedStyle(indicator).zIndex}`);
+        console.log(`✅ Phase indicator should be visible now (blue bar at top center of screen)`);
+        
+        // Hide after 4 seconds
+        setTimeout(() => {
+            console.log(`⏰ Auto-hiding phase indicator after 4 seconds`);
+            indicator.classList.add("hidden");
+        }, 4000);
+    }
+
+    scrollToBottom() {
+        const container = document.getElementById("messages-container");
+        setTimeout(() => {
+            container.scrollTop = container.scrollHeight;
+        }, 0);
+    }
+
+    renderProgress(data) {
+        const container = document.getElementById("progress-container");
+        if (!data || !data.phases) return;
+
+        const currentIndex = data.phases.findIndex(p => p.status === "active") || 0;
+        document.getElementById("phase-progress").textContent = `Step ${currentIndex + 1} of ${data.total_phases}`;
+
+        let html = `<div class="absolute left-[27px] top-4 bottom-4 w-0.5 bg-slate-100 dark:bg-slate-700 -z-10"></div>`;
+
+        for (let i = 0; i < data.phases.length; i++) {
+            const phase = data.phases[i];
+            const isCompleted = phase.status === "completed";
+            const isActive = phase.status === "active";
+            const isUpcoming = phase.status === "upcoming";
+
+            if (isCompleted) {
+                html += `
+                    <div class="flex gap-4 pb-8 group">
+                        <div class="w-6 h-6 rounded-full bg-green-500 text-white flex items-center justify-center shrink-0 ring-4 ring-white dark:ring-slate-800 z-10">
+                            <span class="material-symbols-outlined text-sm font-bold">check</span>
+                        </div>
+                        <div class="pt-0.5">
+                            <h4 class="text-sm font-bold text-slate-900 dark:text-slate-100">${phase.phase_name}</h4>
+                            <p class="text-xs text-slate-500 mt-1">Completed</p>
+                        </div>
+                    </div>
+                `;
+            } else if (isActive) {
+                html += `
+                    <div class="flex gap-4 pb-8">
+                        <div class="relative w-6 h-6 shrink-0 z-10 flex items-center justify-center">
+                            <div class="absolute inset-0 rounded-full bg-primary/30 animate-ping"></div>
+                            <div class="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center shadow-lg shadow-primary/30 ring-4 ring-white dark:ring-slate-800">
+                                <span class="text-[10px] font-bold">${i + 1}</span>
+                            </div>
+                        </div>
+                        <div class="pt-0.5">
+                            <h4 class="text-sm font-bold text-primary">${phase.phase_name}</h4>
+                            <p class="text-xs text-slate-500 mt-1">Current active phase</p>
+                        </div>
+                    </div>
+                `;
+            } else {
+                html += `
+                    <div class="flex gap-4 pb-8 opacity-60">
+                        <div class="w-6 h-6 rounded-full bg-white dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-600 text-slate-400 flex items-center justify-center shrink-0 ring-4 ring-white dark:ring-slate-800 z-10">
+                            <span class="text-[10px] font-bold">${i + 1}</span>
+                        </div>
+                        <div class="pt-0.5">
+                            <h4 class="text-sm font-medium text-slate-600 dark:text-slate-400">${phase.phase_name}</h4>
+                            <p class="text-xs text-slate-400 mt-1">Upcoming</p>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        container.innerHTML = html;
+    }
+
+    async updateUI() {
+        const data = await this.fetchPhaseGroupedMessages();
+        const state = await this.fetchState();
+
+        if (data) {
+            console.log(`🔄 Rendering UI with ${data.phases?.length || 0} phases`);
+            this.renderMessages(data);
+            this.renderProgress(data);
+        } else {
+            console.warn("⚠️ No data returned from fetchPhaseGroupedMessages");
+        }
+
+        if (state && state.speaker) {
+            const speaker = state.speaker.speaker;
+            const speakerDisplay = speaker === "human" ? "Human Speaking" : speaker === "ai" ? "AI Speaking" : "Listening";
+            document.getElementById("speaker-status").textContent = speakerDisplay;
+            document.getElementById("current-speaker").textContent = speakerDisplay;
+        }
+    }
+
+    startPolling() {
+        console.log(`🚀 Starting UI polling every ${this.pollingInterval}ms`);
+        this.updateUI();
+        setInterval(() => {
+            console.log(`⏱️ Poll tick at ${new Date().toLocaleTimeString()}`);
+            this.updateUI();
+        }, this.pollingInterval);
+    }
+
+    escapeHtml(text) {
+        const div = document.createElement("div");
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    log(message, level = "info") {
+        const timestamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        const prefix = level === "error" ? "❌" : level === "warning" ? "⚠️" : "ℹ️";
+        console.log(`${prefix} ${message}`);
+        
+        // Also add to on-screen debug console if enabled
+        const debugConsole = document.getElementById("debug-console");
+        if (debugConsole && !debugConsole.classList.contains("hidden")) {
+            const line = document.createElement("div");
+            line.textContent = `${timestamp} ${prefix} ${message}`;
+            line.className = level === "error" ? "text-red-400" : level === "warning" ? "text-yellow-400" : "text-green-400";
+            debugConsole.appendChild(line);
+            debugConsole.scrollTop = debugConsole.scrollHeight;
+        }
+    }
+}
+
+// Initialize the app when the page loads
+window.addEventListener("DOMContentLoaded", () => {
+    new DashboardApp();
+});
+</script>
+</body></html>

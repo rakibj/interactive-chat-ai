@@ -26,6 +26,8 @@ from .api.models import (
     WSConnectionRequest,
     ChatMessage,
     ChatHistory,
+    PhaseMessages,
+    PhaseGroupedChatHistory,
 )
 from .api.session_manager import get_session_manager
 from .api.event_buffer import EventBuffer
@@ -208,7 +210,7 @@ async def get_conversation_history(limit: int = 50):
 async def get_chat_messages(limit: int = 100):
     """Get conversation messages formatted for UI display.
     
-    Returns the complete conversation history with human and AI messages
+    Returns the complete conversation history from ALL PHASES with human and AI messages
     formatted and ready for chat UI rendering.
     
     Args:
@@ -226,37 +228,50 @@ async def get_chat_messages(limit: int = 100):
     if limit > 500:
         limit = 500
     
-    # Get messages from conversation memory
-    try:
-        messages_raw = _engine.conversation_memory.get_messages()
-    except AttributeError:
-        messages_raw = []
+    state = _engine.state
     
-    # Filter and format messages (skip system messages for display)
-    all_messages = []  # First, collect all non-system messages
+    # IMPORTANT: Build complete message history from ALL PHASES
+    # Include messages from message_history_by_phase (previous phases) + current memory
+    all_messages = []
+    
+    # 1. Get messages from completed phases (preserved in message_history_by_phase)
+    message_history_by_phase = getattr(state, "message_history_by_phase", {})
+    
+    # Add messages from each completed phase in order
+    phases_completed = getattr(state, "phases_completed", [])
+    for phase_id in phases_completed:
+        if phase_id in message_history_by_phase:
+            phase_messages = message_history_by_phase[phase_id]
+            for msg in phase_messages:
+                role = msg.get("role", "system")
+                if role != "system":  # Skip system messages
+                    all_messages.append(msg)
+    
+    # 2. Get messages from current phase (conversation memory)
+    current_phase_id = state.active_phase_id or "current"
+    try:
+        current_messages_raw = _engine.conversation_memory.get_messages()
+        for msg in current_messages_raw:
+            role = msg.get("role", "system")
+            if role != "system":  # Skip system messages
+                all_messages.append(msg)
+    except AttributeError:
+        pass
+    
+    # Count message types and skip duplicates
     human_count = 0
     ai_count = 0
     current_time = datetime.now().timestamp()
     
-    # Process all messages
-    for raw_msg in messages_raw:
+    # Filter and format messages (skip system messages for display)
+    for raw_msg in all_messages:
         role = raw_msg.get("role", "system")
-        content = raw_msg.get("content", "")
-        
-        # Skip system messages in display (but they don't count toward limit)
-        if role == "system":
-            continue
         
         # Count message types
         if role == "user":
             human_count += 1
         elif role == "assistant":
             ai_count += 1
-        
-        all_messages.append({
-            "role": role,
-            "content": content,
-        })
     
     # Take only the last `limit` messages for display and assign indices
     messages = []
@@ -271,9 +286,6 @@ async def get_chat_messages(limit: int = 100):
         )
         messages.append(chat_msg)
     
-    # Get current state info
-    state = _engine.state
-    
     return ChatHistory(
         messages=messages,
         total_messages=len(messages),
@@ -281,6 +293,131 @@ async def get_chat_messages(limit: int = 100):
         phase_id=state.active_phase_id,
         human_messages=human_count,
         ai_messages=ai_count,
+    ).model_dump()
+
+
+# ==================== PHASE-GROUPED CHAT HISTORY ====================
+
+
+@app.get(
+    "/api/chat/phases",
+    response_model=None,
+    summary="Get chat messages grouped by phases",
+    tags=["Conversation"],
+)
+async def get_chat_messages_by_phases():
+    """Get conversation messages grouped by phases with complete phase metadata.
+    
+    Returns all messages organized by phase boundaries with phase information.
+    This endpoint is optimized for UI display with phase dividers.
+    
+    Returns:
+        PhaseGroupedChatHistory with phases, messages, and phase tracking
+    """
+    if not _engine:
+        raise HTTPException(status_code=503, detail="Engine not initialized")
+    
+    state = _engine.state
+    
+    # Build complete message history from history log + current messages
+    message_history_by_phase = dict(getattr(state, "message_history_by_phase", {}))
+    
+    # Add current phase's messages (from conversation_memory)
+    try:
+        current_messages_raw = _engine.conversation_memory.get_messages()
+        current_messages = [
+            msg for msg in current_messages_raw
+            if msg.get("role") != "system"
+        ]
+        active_phase_id = state.active_phase_id or "default"
+        message_history_by_phase[active_phase_id] = current_messages
+    except AttributeError:
+        current_messages = []
+    
+    # Count total messages and types across ALL phases
+    human_count = 0
+    ai_count = 0
+    all_messages_flat = []
+    
+    for phase_id, phase_messages in message_history_by_phase.items():
+        for msg in phase_messages:
+            role = msg.get("role", "system")
+            if role == "user":
+                human_count += 1
+            elif role == "assistant":
+                ai_count += 1
+            all_messages_flat.append({"role": role, "content": msg.get("content", ""), "phase_id": phase_id})
+    
+    current_time = datetime.now().timestamp()
+    
+    # Get phase information from engine
+    active_phase_id = state.active_phase_id or "default"
+    phases_completed = getattr(state, "phases_completed", [])
+    total_phases = getattr(state, "total_phases", 1)
+    current_phase_profile = _engine.active_phase_profile if hasattr(_engine, "active_phase_profile") else None
+    
+    # Build phase list in PROFILE ORDER (not completion order)
+    phases_list = []
+    
+    # CRITICAL: Get phases in their actual profile order, not in completed order
+    if current_phase_profile and current_phase_profile.phases:
+        # Get all phase IDs from profile in order
+        all_profile_phase_ids = list(current_phase_profile.phases.keys())
+    else:
+        # Fallback: use phases_completed order
+        all_profile_phase_ids = phases_completed or []
+    
+    # Build phases list in profile order
+    for phase_index, phase_id in enumerate(all_profile_phase_ids):
+        # Determine phase status
+        if phase_id in phases_completed:
+            phase_status = "completed"
+        elif phase_id == active_phase_id:
+            phase_status = "active"
+        else:
+            phase_status = "upcoming"
+        
+        # Get messages for this phase
+        phase_msgs = message_history_by_phase.get(phase_id, [])
+        chat_messages = []
+        for idx, msg_dict in enumerate(phase_msgs):
+            chat_msg = ChatMessage(
+                role=msg_dict["role"],
+                content=msg_dict["content"],
+                index=idx,
+                timestamp=current_time
+            )
+            chat_messages.append(chat_msg)
+        
+        # Get phase name from profile if available
+        phase_name = phase_id.replace("_", " ").title()
+        if current_phase_profile and phase_id in current_phase_profile.phases:
+            phase_obj = current_phase_profile.phases[phase_id]
+            if hasattr(phase_obj, 'name'):
+                phase_name = phase_obj.name
+        
+        # Create phase entry with correct index based on profile order
+        phase_entry = PhaseMessages(
+            phase_id=phase_id,
+            phase_name=phase_name,
+            phase_index=phase_index,  # Index is position in profile
+            status=phase_status,
+            messages=chat_messages,
+            message_count=len(chat_messages),
+            duration_sec=None
+        )
+        phases_list.append(phase_entry)
+    
+    return PhaseGroupedChatHistory(
+        phases=phases_list,
+        current_phase_id=active_phase_id,
+        total_messages=len(all_messages_flat),
+        total_phases=total_phases,
+        phases_completed=phases_completed,
+        human_messages=human_count,
+        ai_messages=ai_count,
+        turn_id=state.turn_id,
+        phase_profile=current_phase_profile.name if current_phase_profile else None
     ).model_dump()
 
 
@@ -804,6 +941,122 @@ def reset_conversation(reset_req: ConversationReset):
     except Exception as e:
         logger.error(f"Reset error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== TESTING ENDPOINTS ====================
+
+
+@app.post(
+    "/api/test/phase-transition",
+    response_model=dict,
+    summary="[TEST] Simulate a phase transition",
+    tags=["Testing"],
+)
+async def test_phase_transition(phase_name: str = "Phase 2"):
+    """[TESTING ONLY] Simulate a phase transition for UI testing.
+    
+    This endpoint is for testing the phase change detector in the frontend.
+    It transitions to a new phase and updates the state.
+    
+    Args:
+        phase_name: Name of the phase to transition to
+    
+    Returns:
+        Status message with new phase info
+    """
+    if not _engine:
+        raise HTTPException(status_code=503, detail="Engine not initialized")
+    
+    # Get current state
+    state = _engine.state
+    
+    # Save current phase's messages before transitioning
+    if state.active_phase_id:
+        current_messages = _engine.conversation_memory.get_messages()
+        current_messages = [m for m in current_messages if m.get("role") != "system"]
+        if state.active_phase_id not in state.message_history_by_phase:
+            state.message_history_by_phase[state.active_phase_id] = []
+        state.message_history_by_phase[state.active_phase_id].extend(current_messages)
+        
+        # Only mark as completed if not already in the list (prevent duplicates)
+        if state.active_phase_id not in state.phases_completed:
+            state.phases_completed.append(state.active_phase_id)
+        
+        # CRITICAL: Deduplicate the entire list (remove any accumulated duplicates)
+        # Use dict.fromkeys to preserve order while removing duplicates
+        state.phases_completed = list(dict.fromkeys(state.phases_completed))
+    
+    # Transition to new phase
+    new_phase_id = phase_name.lower().replace(" ", "_")
+    state.active_phase_id = new_phase_id
+    state.current_phase_id = new_phase_id  # Keep these in sync
+    
+    # Get the actual phase profile to get the proper name
+    actual_phase_name = phase_name
+    if _engine.active_phase_profile and new_phase_id in _engine.active_phase_profile.phases:
+        phase_profile = _engine.active_phase_profile.phases[new_phase_id]
+        actual_phase_name = phase_profile.name
+    
+    state.active_phase_name = actual_phase_name
+    
+    # Calculate phase_index: position in the actual phase list (if available)
+    if _engine.active_phase_profile:
+        phase_ids = list(_engine.active_phase_profile.phases.keys())
+        state.phase_index = phase_ids.index(new_phase_id) if new_phase_id in phase_ids else len(phase_ids) - 1
+    else:
+        # Fallback: count of completed + 1 (for current)
+        state.phase_index = len(state.phases_completed)
+    
+    # Clear conversation memory for new phase
+    _engine.conversation_memory.clear()
+    
+    return {
+        "success": True,
+        "message": f"Transitioned to phase: {actual_phase_name}",
+        "phase_id": new_phase_id,
+        "phase_name": actual_phase_name,
+        "phase_index": state.phase_index,
+        "phases_completed": state.phases_completed,
+    }
+
+
+@app.get(
+    "/api/test/phases-status",
+    response_model=dict,
+    summary="[TEST] Get current phase status",
+    tags=["Testing"],
+)
+async def test_phases_status():
+    """[TESTING ONLY] Get current phase status for debugging.
+    
+    Returns detailed phase state information.
+    """
+    if not _engine:
+        raise HTTPException(status_code=503, detail="Engine not initialized")
+    
+    state = _engine.state
+    
+    # Get available phases from profile
+    available_phases = []
+    if _engine.active_phase_profile:
+        available_phases = list(_engine.active_phase_profile.phases.keys())
+    
+    return {
+        "active_phase_id": state.active_phase_id,
+        "active_phase_name": getattr(state, "active_phase_name", None),
+        "phase_index": state.phase_index,
+        "total_phases": state.total_phases,
+        "phases_completed": state.phases_completed,
+        "available_phases": available_phases,
+        "message_history_keys": list(state.message_history_by_phase.keys()),
+        "phase_change_log": [
+            f"{pid}: {len(msgs)} messages"
+            for pid, msgs in state.message_history_by_phase.items()
+        ],
+    }
+
+
+# ==================== DOCUMENTATION ====================
 
 
 @app.get("/docs", include_in_schema=False)
