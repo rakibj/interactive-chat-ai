@@ -132,20 +132,25 @@ while not shutdown:
 - Total processing latency
 - Final user and AI transcripts
 
-**Recent Fixes** (Latest Session):
-- ✅ Fixed test_error_handling.py import error - removed broken interface.profiles module import
+**Recent Fixes** (Latest Session - Critical Stability):
+- ✅ **CRITICAL FIX**: Added comprehensive exception handling to event loop in `main.py` - app was silently exiting with unhandled errors
+  - Wrapped state reduction with try/except to catch and log reducer errors
+  - Wrapped action handling with try/except to prevent side-effect failures from crashing loop
+  - Added outer exception handler in main loop to catch any unexpected errors
+  - App now continues gracefully even when individual operations fail
+- ✅ Created 3 new stability tests (test_app_stability.py) that verify no crash on human input:
+  - `test_human_speaking_doesnt_crash` - Simulates full conversation turn with human speech
+  - `test_event_loop_exception_handling` - Verifies reducer exceptions are caught
+  - `test_action_handler_exception_handling` - Verifies action handler exceptions don't crash app
+- ✅ Fixed test_error_handling.py import error - removed broken interface.profiles module reference
+- ✅ Verified all core unit tests still pass (16/16 in test_headless_standalone.py)
+- ✅ Confirmed all stability tests pass (3/3 in test_app_stability.py)
+
+**Previous Session Fixes** (February 26, 2026):
+- ✅ Fixed test_error_handling.py import error - removed broken interface.profiles module reference
 - ✅ Updated test infrastructure to use current ConversationEngine API (profile_key strings)
 - ✅ Verified all core unit tests pass (16/16 in test_headless_standalone.py) ✅
 - ✅ Confirmed test collection works without errors (19 test files, 266+ tests ready)
-
-**Previous Session Fixes** (February 26, 2026):
-- ✅ Fixed "init failed" error - app now shows clear "CONVERSATION ENGINE INITIALIZED AND READY" status
-- ✅ Added 30-second timeout for VAD model loading with graceful fallback to energy-only detection
-- ✅ Added 5-second timeout for stream initialization to prevent hangs
-- ✅ Fixed Groq API 401 error - switched to working OpenAI backend in config.py
-- ✅ Added null checks for optional components (AudioManager, ASR, LLM, TTS)
-- ✅ Enhanced error messages showing current LLM backend and diagnostics
-- ✅ Reorganized all tests into unified /tests/ directory structure
 
 ### 2. Event-Driven Core (`core/event_driven_core.py`)
 

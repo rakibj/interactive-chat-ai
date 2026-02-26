@@ -111,7 +111,6 @@ def main():
             print("\n[SOLUTION] Try running with --no-api flag:")
             print("  uv run python run_html_app.py --no-api")
             sys.exit(1)
-        engine = ConversationEngine(profile_key=profile_key)
         
         # Register engine with API server (for REST endpoints)
         if not args.no_api:
