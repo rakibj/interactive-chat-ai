@@ -1066,8 +1066,9 @@ async def test_phase_transition(phase_name: str = "Phase 2"):
         # Fallback: count of completed + 1 (for current)
         state.phase_index = len(state.phases_completed)
     
-    # Clear conversation memory for new phase
-    _engine.conversation_memory.clear()
+    # DO NOT clear conversation_memory - messages are preserved in message_history_by_phase
+    # and the /api/chat endpoint reconstructs the full history from all phases
+    # _engine.conversation_memory.clear()  # REMOVED: Preserve chat history across phases
     
     return {
         "success": True,
