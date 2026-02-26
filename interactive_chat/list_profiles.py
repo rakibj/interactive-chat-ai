@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from config import INSTRUCTION_PROFILES
+from interactive_chat.config import INSTRUCTION_PROFILES
 
 
 def show_profiles():
@@ -21,7 +21,7 @@ def show_profiles():
 
 def show_config():
     """Display current configuration."""
-    from config import CONVERSATION_START, ACTIVE_PROFILE
+    from interactive_chat.config import CONVERSATION_START, ACTIVE_PROFILE
     
     print("\n" + "=" * 70)
     print("⚙️  CURRENT CONFIGURATION")

@@ -8,7 +8,7 @@ See: core/event_driven_core.py, Reducer._check_interruption() and Reducer.reduce
 """
 import time
 from typing import Tuple, Optional
-from config import (
+from interactive_chat.config import (
     INTERRUPT_DEBOUNCE_MS,
     INTERRUPTION_SENSITIVITY,
     MIN_WORDS_FOR_INTERRUPT,

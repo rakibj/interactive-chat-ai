@@ -113,7 +113,11 @@ async def get_phase_state():
     phase_name = "Unknown Phase"
     if _engine.active_phase_profile and state.active_phase_id:
         try:
-            phase_name = _engine.active_phase_profile.phases[state.active_phase_id].name
+            phases_dict = getattr(_engine.active_phase_profile, 'phases', None)
+            if phases_dict and isinstance(phases_dict, dict) and state.active_phase_id in phases_dict:
+                phase_obj = phases_dict[state.active_phase_id]
+                if hasattr(phase_obj, 'name') and isinstance(phase_obj.name, str):
+                    phase_name = phase_obj.name
         except (KeyError, AttributeError, TypeError):
             phase_name = "Unknown Phase"
     
@@ -360,12 +364,50 @@ async def get_chat_messages_by_phases():
     phases_list = []
     
     # CRITICAL: Get phases in their actual profile order, not in completed order
-    if current_phase_profile and current_phase_profile.phases:
-        # Get all phase IDs from profile in order
-        all_profile_phase_ids = list(current_phase_profile.phases.keys())
-    else:
-        # Fallback: use phases_completed order
-        all_profile_phase_ids = phases_completed or []
+    # Check if current_phase_profile has a valid .phases dict
+    all_profile_phase_ids = []
+    
+    if current_phase_profile:
+        try:
+            # Try to get phases from profile (handles both real profiles and properly configured mocks)
+            phases_dict = getattr(current_phase_profile, 'phases', None)
+            if phases_dict and isinstance(phases_dict, dict):
+                all_profile_phase_ids = list(phases_dict.keys())
+        except (AttributeError, TypeError):
+            pass
+    
+    # If no phases from profile, build from completed phases and message history
+    if not all_profile_phase_ids:
+        # Combine all phase IDs that have either messages or are marked as completed
+        all_phase_ids_set = set()
+        
+        # Add completed phases
+        if phases_completed:
+            all_phase_ids_set.update(phases_completed)
+        
+        # Add phases that have messages in history
+        all_phase_ids_set.update(message_history_by_phase.keys())
+        
+        # Add active phase if not already included
+        if active_phase_id:
+            all_phase_ids_set.add(active_phase_id)
+        
+        # Order: completed phases first, then active, then any others
+        ordered_ids = []
+        for phase_id in (phases_completed or []):
+            if phase_id in all_phase_ids_set:
+                ordered_ids.append(phase_id)
+                all_phase_ids_set.discard(phase_id)
+        
+        # Add active phase if not already added
+        if active_phase_id and active_phase_id in all_phase_ids_set:
+            ordered_ids.append(active_phase_id)
+            all_phase_ids_set.discard(active_phase_id)
+        
+        # Add remaining phases from message history
+        ordered_ids.extend(sorted(all_phase_ids_set))
+        
+        all_profile_phase_ids = ordered_ids if ordered_ids else [active_phase_id or "default"]
     
     # Build phases list in profile order
     for phase_index, phase_id in enumerate(all_profile_phase_ids):
@@ -391,10 +433,15 @@ async def get_chat_messages_by_phases():
         
         # Get phase name from profile if available
         phase_name = phase_id.replace("_", " ").title()
-        if current_phase_profile and phase_id in current_phase_profile.phases:
-            phase_obj = current_phase_profile.phases[phase_id]
-            if hasattr(phase_obj, 'name'):
-                phase_name = phase_obj.name
+        if current_phase_profile:
+            try:
+                phases_dict = getattr(current_phase_profile, 'phases', None)
+                if phases_dict and isinstance(phases_dict, dict) and phase_id in phases_dict:
+                    phase_obj = phases_dict[phase_id]
+                    if hasattr(phase_obj, 'name') and isinstance(phase_obj.name, str):
+                        phase_name = phase_obj.name
+            except (AttributeError, TypeError):
+                pass
         
         # Create phase entry with correct index based on profile order
         phase_entry = PhaseMessages(
@@ -493,6 +540,12 @@ async def get_full_state():
         and _engine.turn_processing_event.is_set()
     )
     
+    # DEBUG: Log state info for diagnostics
+    import sys
+    timestamp = datetime.now().isoformat()
+    debug_line = f"[API GET /state] {timestamp} | speaker={current_speaker} | processing={is_processing} | turn_id={state.turn_id} | machine={state.state_machine} | human_speaking={state.is_human_speaking}"
+    print(debug_line, file=sys.stderr, flush=True)
+    
     return ConversationState(
         phase=phase_state,
         speaker=speaker_status,
@@ -522,12 +575,13 @@ def _build_phase_progress(state, engine=None) -> list:
         
         profile = engine.active_phase_profile
         
-        # Safety check: ensure phases attribute exists and is iterable
-        if not hasattr(profile, 'phases'):
+        # Safety check: ensure phases attribute exists and is a dict
+        phases_dict = getattr(profile, 'phases', None)
+        if not phases_dict or not isinstance(phases_dict, dict):
             return []
         
         progress = []
-        for phase_id, phase_prof in profile.phases.items():
+        for phase_id, phase_prof in phases_dict.items():
             # Determine status
             if phase_id in (state.phases_completed or []):
                 status = "completed"
@@ -541,10 +595,15 @@ def _build_phase_progress(state, engine=None) -> list:
             if state.phase_progress and phase_id in state.phase_progress:
                 duration_sec = state.phase_progress[phase_id].get("duration_sec")
             
+            # Get phase name safely
+            phase_name = phase_id.replace("_", " ").title()
+            if hasattr(phase_prof, 'name') and isinstance(phase_prof.name, str):
+                phase_name = phase_prof.name
+            
             progress.append(
                 PhaseProgress(
                     id=phase_id,
-                    name=phase_prof.name,
+                    name=phase_name,
                     status=status,
                     duration_sec=duration_sec,
                 )

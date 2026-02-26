@@ -51,8 +51,8 @@ def main():
     )
     parser.add_argument(
         "--profile",
-        default="negotiator",
-        help="Profile to use (default: negotiator)"
+        default="ielts_full_exam",
+        help="Profile to use (default: ielts_full_exam). Options: ielts_full_exam, sales_call, simple_test, name_age_test"
     )
     parser.add_argument(
         "--no-api",
@@ -98,14 +98,36 @@ def main():
         # Initialize engine with the profile_key
         # The engine will use this to determine PhaseProfile vs InstructionProfile mode
         print("\n[INIT] Initializing ConversationEngine...")
+        try:
+            engine = ConversationEngine(profile_key=profile_key)
+        except Exception as e:
+            print(f"\n[ERROR] ConversationEngine initialization failed: {e}")
+            import traceback
+            traceback.print_exc()
+            print("\n[HELP] Possible causes:")
+            print("  1. Audio device not available or in use")
+            print("  2. Model download failed or timeout")
+            print("  3. Missing dependencies (PyTorch, sounddevice, etc.)")
+            print("\n[SOLUTION] Try running with --no-api flag:")
+            print("  uv run python run_html_app.py --no-api")
+            sys.exit(1)
         engine = ConversationEngine(profile_key=profile_key)
         
         # Register engine with API server (for REST endpoints)
         if not args.no_api:
             set_engine(engine)
         
+        # Print a clear "ready" message
+        print(f"\n{'='*60}")
+        print(f"✅ CONVERSATION ENGINE INITIALIZED AND READY")
+        print(f"{'='*60}")
+        print(f"[PROFILE] {engine.profile_settings['name']}")
+        print(f"[AUTHORITY] {engine.state.authority}")
+        print(f"[STATUS] Waiting for audio input...")
+        print(f"{'='*60}\n")
+        
         # Start static file server
-        print("\n[STARTING] Static file server...")
+        print("[STARTING] Static file server...")
         static_thread = threading.Thread(target=start_static_server, daemon=True)
         static_thread.start()
         time.sleep(1)  # Give server time to start

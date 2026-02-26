@@ -2,11 +2,59 @@
 
 This directory contains all automated tests for the Interactive Chat AI project. Tests are organized by category and are designed to be run via pytest with comprehensive coverage.
 
+## Directory Structure
+
+```
+tests/
+├── README.md                          # This file
+├── conftest.py                        # Pytest configuration & fixtures
+├── __init__.py                        # Package marker
+│
+├── utils/                             # Utility & Debug Scripts
+│   ├── __init__.py
+│   ├── check_api_config.py           # Verify API keys are loaded
+│   ├── run_html_app_debug.py         # Debug version of HTML app
+│   ├── test_api_debug.py             # API debugging tests
+│   ├── test_api_key_handling.py      # API key validation
+│   ├── test_audio_debug.py           # Audio system debugging
+│   ├── test_init_debug.py            # Initialization debugging
+│   ├── test_manual_vad.py            # VAD system testing
+│   ├── test_name_age_fix.py          # Name/age profile testing
+│   └── debug_tts_pipeline.py         # TTS pipeline debugging
+│
+├── Core Tests (Unit)
+│   ├── test_headless_standalone.py   # 16 core logic tests
+│   ├── test_headless_comprehensive.py # 20 state machine tests
+│   ├── test_signal_parsing.py        # 24 signal parsing tests
+│   └── test_signals_integration.py   # 5 signal architecture tests
+│
+├── Phase Tests
+│   ├── test_phase_observation_events.py # 10 phase transition tests
+│   ├── test_phase_grouped_chat.py    # Chat grouping by phase
+│   ├── test_phase2_integration.py    # Phase integration tests
+│   ├── verify_phase_implementation.py # Phase verification script
+│   └── verify_signal_parsing_fix.py  # Signal parsing verification
+│
+├── Integration Tests
+│   ├── test_app_initialization.py    # App startup tests
+│   ├── test_api_endpoints.py         # REST API tests
+│   ├── test_integration_api_live.py  # Live API testing
+│   ├── test_integration_phase_api_live.py # Phase API testing
+│   ├── test_chat_api.py              # Chat message API tests
+│   ├── test_message_preservation.py  # Message persistence
+│   └── test_websocket_streaming.py   # WebSocket tests
+│
+└── E2E / Flow Tests
+    ├── test_e2e_conversation_flows.py # 10 full conversation tests
+    ├── test_interactive_controls.py   # Control flow tests
+    └── test_turn_flow.py              # (moved to utils - legacy)
+```
+
 ## Test Structure
 
 ### Test Categories
 
-#### 1. **Unit Tests** - Core Logic Testing
+#### 1. **Unit Tests** - Core Logic Testing (40 tests)
 Focus on isolated components without external dependencies.
 
 | File | Tests | Purpose |
@@ -23,13 +71,14 @@ uv run pytest tests/test_headless_*.py tests/test_signal*.py -v
 
 ---
 
-#### 2. **Phase Tests** - Multi-Phase Conversation Logic
+#### 2. **Phase Tests** (10+ tests) - Multi-Phase Conversation Logic
 Tests for phase transitions, phase profiles, and signal-driven flow control.
 
 | File | Tests | Purpose |
 |------|-------|---------|
 | `test_phase_observation_events.py` | 10 | Phase transitions and completion tracking |
-| `verify_phase_implementation.py` | - | Verification script for all phase components |
+| `test_phase_grouped_chat.py` | - | Chat message grouping by phase |
+| `verify_phase_implementation.py` | - | Manual verification script |
 
 **Run phase tests:**
 ```bash
@@ -47,7 +96,6 @@ uv run python tests/verify_phase_implementation.py
 Tests that start actual servers and validate end-to-end flows.
 
 | File | Type | Purpose |
-|------|------|---------|
 | `test_app_initialization.py` | Pytest | Validates app can start without errors |
 | `test_integration_api_live.py` | Standalone | Starts ConversationEngine + API, tests /api/state endpoint |
 | `test_integration_phase_api_live.py` | Standalone | Simulates phase API responses and frontend rendering |
@@ -440,6 +488,48 @@ uv run python tests/test_integration_api_live.py
 
 ---
 
-**Last Updated:** February 24, 2026  
-**Total Tests:** 120+ automated pytest tests + 2 verification scripts  
+## Utility & Debug Scripts
+
+Utility scripts are organized in `tests/utils/` for easy access. These help with debugging, configuration, and development.
+
+**Check API Configuration:**
+```bash
+# Verify all API keys are loaded correctly
+uv run python tests/utils/check_api_config.py
+```
+
+**Debug Modes:**
+```bash
+# Run app with debug initialization output
+uv run python tests/utils/run_html_app_debug.py
+
+# Test manual VAD (Voice Activity Detection)
+uv run python tests/utils/test_manual_vad.py
+
+# Test audio subsystem
+uv run python tests/utils/test_audio_debug.py
+
+# Debug TTS pipeline
+uv run python tests/utils/debug_tts_pipeline.py
+
+# Test profile name/age features
+uv run python tests/utils/test_name_age_fix.py
+```
+
+**API Debugging:**
+```bash
+# Test API key handling
+uv run python tests/utils/test_api_key_handling.py
+
+# API endpoint debugging
+uv run python tests/utils/test_api_debug.py
+
+# Test engine initialization
+uv run python tests/utils/test_init_debug.py
+```
+
+---
+
+**Last Updated:** February 26, 2026  
+**Total Tests:** 120+ automated pytest tests + 10 utility/debug scripts  
 **Coverage:** 100% of critical paths with edge case validation

@@ -1,7 +1,7 @@
 """Conversation memory management using ephemeral deque buffer."""
 from collections import deque
 from typing import List, Dict
-from config import MAX_MEMORY_TURNS
+from interactive_chat.config import MAX_MEMORY_TURNS
 
 
 class ConversationMemory:

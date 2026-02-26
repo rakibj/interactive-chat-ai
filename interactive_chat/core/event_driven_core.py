@@ -86,6 +86,9 @@ class SystemState:
     current_speaker: str = "silence"  # "human", "ai", "silence"
     previous_speaker: str = "silence"
     
+    # AI Response Tracking (for AI Authority mode)
+    ai_has_responded: bool = False  # Set to True after AI generates first response (prevents human speech until AI responds when authority="ai")
+    
     # Logic State
     human_speaking_limit_ack_sent: bool = False
     force_ended: bool = False
@@ -124,6 +127,11 @@ class Reducer:
         if event.type == EventType.VAD_SPEECH_START:
             if Reducer._is_mic_muted(state):
                 return state, actions
+            
+            # GUARD: When authority="ai", don't accept human speech until AI has responded
+            if state.authority == "ai" and not state.ai_has_responded:
+                actions.append(Action(ActionType.LOG, {"message": "⏸️  Ignoring human speech - waiting for AI greeting..."}))
+                return state, actions  # Discard this event, don't transition to SPEAKING
                 
             state.is_human_speaking = True
             state.last_voice_time = event.timestamp

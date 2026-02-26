@@ -9,8 +9,8 @@ See: core/event_driven_core.py, Reducer.reduce()
 import numpy as np
 from collections import deque
 from typing import Tuple
-from utils.text import lexical_bias, energy_decay_score
-from config import (
+from interactive_chat.utils.text import lexical_bias, energy_decay_score
+from interactive_chat.config import (
     PAUSE_MS,
     END_MS,
     ENERGY_FLOOR,

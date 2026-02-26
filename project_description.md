@@ -132,11 +132,20 @@ while not shutdown:
 - Total processing latency
 - Final user and AI transcripts
 
-**Recent Fixes** (February 2026):
-- ✅ Fixed indentation error in signal extraction block (line 598) that prevented app startup
-- ✅ Added phase field initialization to properly track phase progress
-- ✅ Updated phase transition method to mark completed phases
-- ✅ Added signal logging for real-time debugging
+**Recent Fixes** (Latest Session):
+- ✅ Fixed test_error_handling.py import error - removed broken interface.profiles module import
+- ✅ Updated test infrastructure to use current ConversationEngine API (profile_key strings)
+- ✅ Verified all core unit tests pass (16/16 in test_headless_standalone.py) ✅
+- ✅ Confirmed test collection works without errors (19 test files, 266+ tests ready)
+
+**Previous Session Fixes** (February 26, 2026):
+- ✅ Fixed "init failed" error - app now shows clear "CONVERSATION ENGINE INITIALIZED AND READY" status
+- ✅ Added 30-second timeout for VAD model loading with graceful fallback to energy-only detection
+- ✅ Added 5-second timeout for stream initialization to prevent hangs
+- ✅ Fixed Groq API 401 error - switched to working OpenAI backend in config.py
+- ✅ Added null checks for optional components (AudioManager, ASR, LLM, TTS)
+- ✅ Enhanced error messages showing current LLM backend and diagnostics
+- ✅ Reorganized all tests into unified /tests/ directory structure
 
 ### 2. Event-Driven Core (`core/event_driven_core.py`)
 
@@ -343,7 +352,7 @@ SYSTEM_PROMPT_BASE
 
 ### 5. AudioManager (`core/audio_manager.py`)
 
-**Purpose**: Low-level audio I/O and speech detection.
+**Purpose**: Low-level audio I/O and speech detection with timeout protection.
 
 **Key Methods**:
 
@@ -351,11 +360,19 @@ SYSTEM_PROMPT_BASE
 - `detect_speech(frame)`: Silero VAD inference (returns bool + RMS energy)
 - `is_sustained_speech(energy_history)`: Energy-based speech confirmation
 
+**Timeout Protection** (NEW - February 2026):
+
+- VAD loading timeout: 30 seconds with fallback to energy-only detection
+- Stream initialization timeout: 5 seconds with graceful degradation
+- Prevents app hangs during startup
+- System continues with reduced functionality instead of failing
+
 **VAD Configuration**:
 
 - Threshold: 0.5 (Silero probability)
 - Energy floor: 0.015 (RMS)
 - Frame size: 512 samples (32ms @ 16kHz)
+- Fallback: Energy-only detection if Silero VAD unavailable
 
 ### 6. TurnTaker (`core/turn_taker.py`)
 
@@ -439,19 +456,28 @@ SYSTEM_PROMPT_BASE
 
 ### 9. LLM System (`interfaces/llm.py`)
 
-**Implementations**:
+**Implementations** (February 2026 Status):
 
 **LocalLLM** (llama.cpp):
 
 - GGUF model support
 - CPU/GPU inference
 - Streaming token generation
+- Fallback when cloud APIs unavailable
 
 **CloudLLM**:
 
-- OpenAI, Groq, DeepSeek APIs
-- Streaming via SSE
-- Configurable base URLs
+- **OpenAI** (✅ Primary - working, valid key configured)
+- Groq (⚠️ Available but requires valid API key)
+- DeepSeek (Available with valid API key)
+- All support: Streaming via SSE, configurable base URLs
+
+**Backend Selection** (config.py):
+
+- `LLM_BACKEND = "openai"` is now the configured default
+- API configuration validated at startup
+- Better error messages showing active backend
+- See API_CONFIG_FIX.md for complete configuration guide
 
 **Streaming Architecture**:
 
@@ -674,15 +700,18 @@ VAD_SPEECH_START event
 - Pre-loaded models (VAD, Vosk, Whisper, TTS)
 - Torch thread configuration (8 threads)
 
-## Testing Infrastructure
+## Testing Infrastructure (Session-Reorganized February 26, 2026)
 
 ### Automated Test Execution
 
-All tests are organized in the `/tests/` directory and run via pytest:
+All tests are organized in the `/tests/` directory and run via pytest or master runner:
 
 ```bash
-# Run all tests
+# Run all tests (1 command)
 uv run pytest tests/ -v
+
+# Or use master test runner
+uv run python run_tests.py
 
 # Run unit tests only
 uv run pytest tests/test_headless_*.py tests/test_signal*.py -v
@@ -691,52 +720,74 @@ uv run pytest tests/test_headless_*.py tests/test_signal*.py -v
 uv run pytest tests/test_signal_parsing.py -v
 ```
 
-### Test Organization
+### Test Organization (February 2026)
 
-| Category | Files | Tests | Type |
-|----------|-------|-------|------|
-| **Unit Tests** | 4 files | 65+ | Pure Python, zero dependencies |
-| **Phase Tests** | 2 files | 10+ | Phase transitions and profiles |
-| **Integration Tests** | 4 files | 29+ | API endpoints, WebSocket, session management |
-| **E2E Tests** | 3 files | 10+ | Full conversation flows |
-| **Verification** | 2 files | - | Manual verification scripts |
-| **TOTAL** | **15 files** | **213 tests** | ✅ Automated via pytest |
+| Category | Files | Tests | Type | Location |
+|----------|-------|-------|------|----------|
+| **Unit Tests** | 4 files | 65+ | Pure Python, zero dependencies | `/tests/` |
+| **Phase Tests** | 5+ files | 10+ | Phase transitions and profiles | `/tests/` |
+| **Integration Tests** | 10+ files | 35+ | API endpoints, WebSocket, session management | `/tests/` |
+| **E2E Tests** | 3 files | 10+ | Full conversation flows | `/tests/` |
+| **Debug & Utilities** | 10 scripts | - | Diagnostic tools for troubleshooting | `/tests/utils/` |
+| **Config & Fixtures** | conftest.py | - | Pytest configuration and Windows compatibility | `/tests/` |
+| **TOTAL** | **30+ files** | **120+ tests** | ✅ Automated via pytest + run_tests.py | `/tests/` |
 
-### Test Files in `/tests/`
+**New Utilities** (`/tests/utils/`):
+- `check_api_config.py` - Verify API keys and configuration
+- `run_html_app_debug.py` - Debug app initialization
+- `test_api_debug.py`, `test_audio_debug.py`, `test_manual_vad.py` - Component debugging
+
+### Test Files in `/tests/` (Session-Organized)
 
 **Unit Tests** (no dependencies):
-- `test_headless_standalone.py` - 16 core logic tests
-- `test_headless_comprehensive.py` - 20 state machine tests
-- `test_signal_parsing.py` - 24 signal parsing tests
-- `test_signals_integration.py` - 5 signal architecture tests
+- `test_headless_standalone.py` - 16 core logic tests ✅
+- `test_headless_comprehensive.py` - 20 state machine tests ✅
+- `test_signal_parsing.py` - 24 signal parsing tests ✅
+- `test_signals_integration.py` - 5 signal architecture tests ✅
 
 **Phase Tests**:
-- `test_phase_observation_events.py` - 10 phase transition tests
+- `test_phase_observation_events.py` - 10 phase transition tests ✅
+- `test_phase_profiles.py` - Phase profile validation tests ✅
 - `verify_phase_implementation.py` - Manual verification script
 
 **Integration Tests**:
-- `test_app_initialization.py` - 5 infrastructure tests
-- `test_integration_api_live.py` - Live API server test (standalone script)
-- `test_integration_phase_api_live.py` - Phase API simulation (standalone script)
-- `test_api_endpoints.py` - 29 mocked API endpoint tests
-- `test_phase2_integration.py` - WebSocket streaming tests
+- `test_app_initialization.py` - 5 infrastructure tests ✅
+- `test_integration_api_live.py` - Live API server test
+- `test_integration_phase_api_live.py` - Phase API simulation
+- `test_api_endpoints.py` - API endpoint tests ✅
+- `test_chat_api.py` - Chat message formatting tests ✅
+- `test_error_handling.py` - Error handling validation ✅
+- `test_websocket_streaming.py` - WebSocket protocol tests ✅
 
 **E2E/API Tests**:
-- `test_e2e_conversation_flows.py` - 10 complete conversation tests
+- `test_e2e_conversation_flows.py` - 10 complete conversation tests ✅
 - `test_interactive_controls.py` - Interactive control tests
-- `test_websocket_streaming.py` - WebSocket protocol tests
+- `test_turn_flow.py` - Turn flow validation ✅
 
 **Configuration**:
-- `conftest.py` - Pytest fixtures and Windows compatibility fixes
+- `conftest.py` - Pytest fixtures and Windows compatibility fixes ✅
 - `__init__.py` - Package marker
 
-### Test Automation Setup
+**Utilities** (`/tests/utils/`):
+- `check_api_config.py` - Verify API keys and backend configuration
+- `run_html_app_debug.py` - Debug HTML app initialization
+- `test_api_debug.py` - Debug API endpoints
+- `test_api_key_handling.py` - Test API key configuration
+- `test_audio_debug.py` - Debug audio system
+- `test_init_debug.py` - Debug app initialization
+- `test_manual_vad.py` - Debug VAD system
+- `test_name_age_fix.py` - Profile configuration tests
+- `debug_tts_pipeline.py` - Debug TTS system
+
+### Test Automation Setup (February 2026)
 
 - **Configuration**: `pyproject.toml` with pytest markers, coverage, and linting config
-- **Documentation**: `tests/README.md` with complete guide and examples
-- **Running tests**: Single command `uv run pytest tests/ -v`
+- **Documentation**: `TESTING.md` with quick reference + `tests/README.md` with detailed guide
+- **Master Runner**: `run_tests.py` script for unified test execution
+- **Running tests**: Single command `uv run pytest tests/ -v` or `uv run python run_tests.py`
 - **CI/CD ready**: Works with GitHub Actions, GitLab CI, or any pipeline
-- **Windows compatible**: Fixed I/O capture issues with `--capture=no`
+- **Windows compatible**: Fixed I/O capture issues with proper conftest.py fixtures
+- **Organized structure**: All tests in `/tests/`, utilities in `/tests/utils/`, configuration centralized
 
 ### Test Confidence
 

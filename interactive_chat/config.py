@@ -35,7 +35,7 @@ WHISPER_MODEL_PATH = str(MODELS_ROOT / "whisper" / "distil-small.en")
 WHISPER_CLOUD_MODEL = "gpt-4o-mini-transcribe"  # For cloud: gpt-4o-mini-transcribe, gpt-4o-transcribe
 
 # LLM Configuration
-LLM_BACKEND = "groq"  # Options: "local", "groq", "deepseek", "openai"
+LLM_BACKEND = "openai"  # Options: "local", "groq", "deepseek", "openai"
 GGUF_MODEL_PATH = str(MODELS_ROOT / "llm" / "qwen2.5-3b-instruct-q5_k_m.gguf")
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -166,7 +166,7 @@ class PhaseProfile(BaseModel):
 
 # Conversation Configuration
 CONVERSATION_START = "human"  # Options: "human" or "ai" (can be overridden per profile)
-ACTIVE_PROFILE = "negotiator"  # Select which profile to use
+ACTIVE_PROFILE = "ielts_instructor"  # Select which profile to use
 ACTIVE_PHASE_PROFILE: Optional[str] = None  # If set, use a PhaseProfile instead of single profile
 ACTIVE_PHASE_PROFILE = "ielts_full_exam"  # Example: set to "ielts_full_exam" to use that profile
 # simple_test, ielts_full_exam, sales_call, customer_support, language_tutor, negotiation_scenario

@@ -211,6 +211,16 @@ class TestMessagePreservation:
         mock_engine.state.total_phases = 5
         mock_engine.conversation_memory.get_messages.return_value = []
         
+        # Setup profile with all 5 phases defined
+        profile_mock = mock_engine.active_phase_profile
+        profile_mock.phases = {
+            "phase1": Mock(name="Phase 1"),
+            "phase2": Mock(name="Phase 2"),
+            "phase3": Mock(name="Phase 3"),
+            "phase4": Mock(name="Phase 4"),
+            "phase5": Mock(name="Phase 5"),
+        }
+        
         # Act
         response = client.get("/api/chat/phases")
         

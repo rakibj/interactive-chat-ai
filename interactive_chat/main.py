@@ -45,6 +45,7 @@ from .config import (
     ACTIVE_PROFILE,
     ACTIVE_PHASE_PROFILE,
     PHASE_PROFILES,
+    LLM_BACKEND,
     get_system_prompt,
     get_system_prompt_with_phase_context,
     get_profile_settings,
@@ -140,7 +141,16 @@ class ConversationEngine:
             self.profile_settings = get_profile_settings(active_profile)
             current_phase_id = None
         
-        self.audio_manager = AudioManager()
+        # Initialize audio manager with error handling
+        print("[INIT] Initializing audio system...")
+        try:
+            self.audio_manager = AudioManager()
+        except Exception as e:
+            print(f"⚠️ Audio manager failed: {e}")
+            print(f"⚠️ Audio input will not be available")
+            # Create a minimal audio manager that returns empty chunks
+            self.audio_manager = None
+        
         self.conversation_memory = ConversationMemory()
         
         # Calculate total phases if using phase profile
@@ -213,8 +223,18 @@ class ConversationEngine:
 
     def _audio_producer(self) -> None:
         """Continuously produces audio frames and VAD events."""
+        # Skip if audio manager is not available
+        if self.audio_manager is None:
+            print("⚠️  Audio producer: Skipping (audio manager not available)")
+            return
+        
         vad_buffer = np.zeros(0, dtype=np.float32)
         energy_history = deque(maxlen=15)
+        last_emitted_vad_state = False
+        vad_stability_count = 0
+        vad_stability_threshold = 1  # Reduce to 1 frame for faster response (32ms)
+        
+        frame_count = 0
         
         while not self.shutdown_event.is_set():
             chunk = self.audio_manager.get_audio_chunk()
@@ -227,32 +247,58 @@ class ConversationEngine:
                 frame = vad_buffer[:512]
                 vad_buffer = vad_buffer[512:]
                 
-                # VAD detection (always do this to keep energy_history current)
+                # VAD detection
                 speech_detected, rms = self.audio_manager.detect_speech(frame)
                 energy_history.append(rms)
                 sustained = self.audio_manager.is_sustained_speech(energy_history)
+                current_vad_state = speech_detected or sustained
+                
+                frame_count += 1
 
                 # Hardware Mic Gating (AI Authority Only)
-                is_ai_auth_turn = self.state.authority == "ai" and self.state.is_ai_speaking
+                # CRITICAL: Check both authority AND is_ai_speaking
+                is_ai_auth_turn = (
+                    self.state.authority == "ai" and 
+                    self.state.is_ai_speaking and
+                    not getattr(self, '_audio_producer_override_gating', False)
+                )
+                
+                now = time.time()
                 
                 if not is_ai_auth_turn:
+                    # MICROPHONE ACTIVE - Process audio normally
+                    
                     # Feed ASR (with error handling)
                     from utils.audio import float32_to_int16
                     try:
-                        self.asr.accept_waveform(float32_to_int16(frame).tobytes())
+                        if self.asr is not None:
+                            self.asr.accept_waveform(float32_to_int16(frame).tobytes())
                     except Exception as e:
-                        # Silently ignore waveform processing errors
-                        pass
+                        pass  # Ignore errors
                     
-                    # Emit Events
-                    now = time.time()
-                    self.event_queue.put(Event(EventType.AUDIO_FRAME, now, "audio_stream", {"frame": frame, "is_speech": speech_detected or sustained}))
+                    # Always emit AUDIO_FRAME
+                    self.event_queue.put(Event(EventType.AUDIO_FRAME, now, "audio_stream", {"frame": frame, "is_speech": current_vad_state}))
                     
-                    # Simplified VAD events for core
-                    if speech_detected or sustained:
-                        self.event_queue.put(Event(EventType.VAD_SPEECH_START, now, "vad"))
+                    # Emit debounced VAD events (1 frame threshold)
+                    if current_vad_state != last_emitted_vad_state:
+                        # State changed
+                        vad_stability_count += 1
+                        if vad_stability_count >= vad_stability_threshold:
+                            # Emit transition immediately
+                            if current_vad_state:
+                                self.event_queue.put(Event(EventType.VAD_SPEECH_START, now, "vad"))
+                                print(f"🟢 VAD_SPEECH_START (frame {frame_count})")
+                            else:
+                                self.event_queue.put(Event(EventType.VAD_SPEECH_STOP, now, "vad"))
+                                print(f"⭕ VAD_SPEECH_STOP (frame {frame_count})")
+                            last_emitted_vad_state = current_vad_state
+                            vad_stability_count = 0
                     else:
-                        self.event_queue.put(Event(EventType.VAD_SPEECH_STOP, now, "vad"))
+                        # State unchanged
+                        vad_stability_count = 0
+                else:
+                    # MICROPHONE GATED (AI is speaking) - Skip audio processing
+                    pass
 
     def _start_asr_worker(self) -> None:
         """Periodically update partial text from ASR."""
@@ -273,17 +319,23 @@ class ConversationEngine:
     def _tts_worker(self) -> None:
         """Process TTS sentences from REDUCER ACTIONS."""
         # Drain any queued speech even if shutdown has been requested.
+        print("🎙️ TTS worker started, waiting for text...")
         while not self.shutdown_event.is_set() or not self.speech_to_speak_queue.empty():
             try:
                 text = self.speech_to_speak_queue.get(timeout=0.1)
+                print(f"📤 TTS: Got text from queue: '{text[:60]}'")
                 
                 # Only speak if TTS is available
                 if self.tts is not None:
+                    print(f"🔊 TTS: Speaking now...")
                     # Interrupt event only for human authority (polite mode otherwise)
                     current_authority = self.state.authority
                     event_to_pass = self.human_interrupt_event if current_authority == "human" else None
                     
                     self.tts.speak(text, interrupt_event=event_to_pass)
+                    print(f"✅ TTS: Finished speaking")
+                else:
+                    print(f"⚠️  TTS not initialized, skipping: '{text[:60]}'")
                 
                 # IMPORTANT: Notify reducer that speech finished
                 self.event_queue.put(Event(EventType.AI_SPEECH_FINISHED, time.time(), "tts"))
@@ -292,6 +344,10 @@ class ConversationEngine:
                 time.sleep(0.1) # Small gap between sentences
             except queue.Empty:
                 pass
+            except Exception as e:
+                print(f"❌ TTS worker error: {e}")
+                import traceback
+                traceback.print_exc()
 
     def _request_shutdown(self) -> None:
         """Gracefully stop processing after pending speech finishes."""
@@ -309,7 +365,8 @@ class ConversationEngine:
 
         self.shutdown_event.set()
         # Stop hardware streams
-        self.audio_manager.stop()
+        if self.audio_manager is not None:
+            self.audio_manager.stop()
 
     def _start_tts_worker(self) -> None:
         threading.Thread(target=self._tts_worker, daemon=True).start()
@@ -325,7 +382,8 @@ class ConversationEngine:
             with self.speech_to_speak_queue.mutex:
                 self.speech_to_speak_queue.queue.clear()
             print(f"🛑 AI Interrupted: {action.payload.get('reason')}")
-            self.asr.reset()
+            if self.asr is not None:
+                self.asr.reset()
             
         elif action.type == ActionType.PLAY_ACK:
             def play_ack():
@@ -344,19 +402,31 @@ class ConversationEngine:
             text = re.sub(r'<signals.*?</signals>', '', text, flags=re.DOTALL).strip()
             text = re.sub(r'<signals.*$', '', text, flags=re.DOTALL).strip()
             if text:  # Only queue if there's actual text after cleaning
+                print(f"📥 SPEAK_SENTENCE action: queueing '{text[:60]}' for TTS")
                 self.speech_to_speak_queue.put(text)
                 self.state.turn_ai_transcript += text + " "
+            else:
+                print(f"⚠️  SPEAK_SENTENCE action: empty text after cleaning")
 
 
         elif action.type == ActionType.PROCESS_TURN:
             reason = action.payload.get("reason")
             # Log is now handled by Reducer
             turn_audio = list(self.state.turn_audio_buffer)
+            
+            # Debug: Log turn completion
+            print(f"\n🔵 PROCESS_TURN triggered: reason={reason}, audio_frames={len(turn_audio)}")
+            
+            if len(turn_audio) == 0:
+                print(f"⚠️  Warning: No audio frames captured for turn")
+            
             # Reset state for next turn via event to keep it deterministic
             self.event_queue.put(Event(EventType.RESET_TURN, time.time()))
-            self.asr.reset()
+            if self.asr is not None:
+                self.asr.reset()
             
             # Run transcription/LLM in background thread
+            print(f"🚀 Starting _process_turn_async thread...")
             threading.Thread(target=self._process_turn_async, args=(turn_audio, reason), daemon=True).start()
         
         elif action.type == ActionType.LOG_TURN:
@@ -561,53 +631,117 @@ class ConversationEngine:
     def _generate_ai_turn(self) -> None:
         """Generate an AI turn without waiting for user input (for greetings, etc)."""
         try:
+            print(f"\n🎬 _generate_ai_turn() START")
+            print(f"   authority={self.state.authority}, is_ai_speaking={self.state.is_ai_speaking}")
+            
+            # DO NOT set is_ai_speaking here - let the reducer manage it
+            # Just set current_speaker so UI knows AI will speak
+            self.state.current_speaker = "ai"
+            print(f"   Set current_speaker=ai (reducer will set is_ai_speaking)")
+            
             # LLM Stream with timing
+            print(f"   Getting system prompt...")
+            system_prompt = self._get_current_system_prompt()
+            print(f"   System prompt: {len(system_prompt)} chars")
+            
+            # Skip if LLM is not available
+            if self.llm is None:
+                print(f"   ⚠️  LLM not available, skipping AI turn")
+                self.state.current_speaker = "silence"
+                return
+            
+            print(f"   Calling LLM.stream_completion()...")
             llm_start = time.time()
-            messages = [{"role": "system", "content": self._get_current_system_prompt()}] + self.conversation_memory.get_messages()
+            messages = [{"role": "system", "content": system_prompt}] + self.conversation_memory.get_messages()
+            print(f"   Messages to LLM: {len(messages)}")
+            
             full_response = ""
             signals_started = False
             current_sentence = ""
+            sentence_count = 0
             
             # Hybrid streaming: Stream until <signals, then buffer silently
-            for token in self.llm.stream_completion(
-                messages=messages,
-                max_tokens=self.profile_settings["max_tokens"],
-                temperature=self.profile_settings["temperature"],
-            ):
-                if self.human_interrupt_event.is_set():
-                    self.human_interrupt_event.clear()
-                    return
-                
-                if token:
-                    full_response += token
+            try:
+                for token in self.llm.stream_completion(
+                    messages=messages,
+                    max_tokens=self.profile_settings["max_tokens"],
+                    temperature=self.profile_settings["temperature"],
+                ):
+                    if self.human_interrupt_event.is_set():
+                        self.human_interrupt_event.clear()
+                        return
                     
-                    # Check if signals block is starting (check for opening tag)
-                    if "<signals" in full_response and not signals_started:
-                        signals_started = True
-                        # Strip any partial signal tags from current_sentence before sending
-                        import re
-                        clean_sentence = re.sub(r'<signals.*$', '', current_sentence, flags=re.DOTALL).strip()
-                        if clean_sentence and self._is_valid_ai_sentence(clean_sentence):
-                            self.event_queue.put(Event(EventType.AI_SENTENCE_READY, time.time(), "llm", {"text": clean_sentence}))
-                        current_sentence = ""
-                        continue
-                    
-                    # If signals haven't started, process token as normal sentence
-                    if not signals_started:
-                        current_sentence += token
+                    if token:
+                        full_response += token
                         
-                        # Check for sentence-ending punctuation
-                        if token in ".!?":
-                            if current_sentence.strip() and self._is_valid_ai_sentence(current_sentence.strip()):
-                                self.event_queue.put(Event(EventType.AI_SENTENCE_READY, time.time(), "llm", {"text": current_sentence.strip()}))
+                        # Check if signals block is starting (check for opening tag)
+                        if "<signals" in full_response and not signals_started:
+                            signals_started = True
+                            # Strip any partial signal tags from current_sentence before sending
+                            import re
+                            clean_sentence = re.sub(r'<signals.*$', '', current_sentence, flags=re.DOTALL).strip()
+                            if clean_sentence and self._is_valid_ai_sentence(clean_sentence):
+                                print(f"   📤 Sentence {sentence_count}: '{clean_sentence[:50]}'")
+                                self.event_queue.put(Event(EventType.AI_SENTENCE_READY, time.time(), "llm", {"text": clean_sentence}))
+                                sentence_count += 1
                             current_sentence = ""
-                    # else: signals_started = True, just accumulate silently
+                            continue
+                        
+                        # If signals haven't started, process token as normal sentence
+                        if not signals_started:
+                            current_sentence += token
+                            
+                            # Check for sentence-ending punctuation
+                            if token in ".!?":
+                                if current_sentence.strip() and self._is_valid_ai_sentence(current_sentence.strip()):
+                                    print(f"   📤 Sentence {sentence_count}: '{current_sentence.strip()[:50]}'")
+                                    self.event_queue.put(Event(EventType.AI_SENTENCE_READY, time.time(), "llm", {"text": current_sentence.strip()}))
+                                    sentence_count += 1
+                                current_sentence = ""
+                        # else: signals_started = True, just accumulate silently
+            except Exception as llm_error:
+                # Catch API auth errors and other LLM failures
+                error_msg = str(llm_error)
+                if "401" in error_msg or "invalid_request_error" in error_msg or "invalid_api_key" in error_msg or "unauthorized" in error_msg.lower():
+                    print(f"\n{'='*60}")
+                    print(f"⚠️  {LLM_BACKEND.upper()} API Authentication Error")
+                    print(f"{'='*60}")
+                    print(f"Error: {error_msg}")
+                    print(f"\n💡 Solutions:")
+                    print(f"   1. Check that your {LLM_BACKEND.upper()}_API_KEY in .env is valid")
+                    print(f"   2. Make sure your API key hasn't expired")
+                    print(f"   3. Try a different API backend:")
+                    print(f"      - GROQ (currently set)")
+                    print(f"      - OpenAI (requires OPENAI_API_KEY)")
+                    print(f"      - DeepSeek (requires DEEPSEEK_API_KEY)")
+                    print(f"      - Local (download a GGUF model, no API key needed)")
+                    print(f"\n📝 To switch backends, edit interactive_chat/config.py:")
+                    print(f"   LLM_BACKEND = 'local'  # or 'openai', 'deepseek'")
+                    print(f"\n🛠️  Then restart the application")
+                    print(f"{'='*60}\n")
+                    print(f"System will continue with text-only mode (demo mode)")
+                    
+                    # Queue a helpful message to user
+                    error_response = "I apologize, but I cannot initialize the voice system at the moment. The system is running in text-only mode. Please verify your API configuration and restart."
+                    for sentence in error_response.split(". "):
+                        sentence = sentence.strip()
+                        if sentence:
+                            self.event_queue.put(Event(EventType.AI_SENTENCE_READY, time.time(), "llm", {"text": sentence + "."}))
+                            sentence_count += 1
+                else:
+                    # Re-raise non-auth errors
+                    raise
             
             # Handle any remaining sentence at end of stream (stream ended without period)
             if current_sentence.strip() and not signals_started and self._is_valid_ai_sentence(current_sentence.strip()):
+                print(f"   📤 Sentence {sentence_count}: '{current_sentence.strip()[:50]}'")
                 self.event_queue.put(Event(EventType.AI_SENTENCE_READY, time.time(), "llm", {"text": current_sentence.strip()}))
+                sentence_count += 1
             
-            self.state.turn_llm_generation_ms = (time.time() - llm_start) * 1000
+            generation_time = (time.time() - llm_start) * 1000
+            print(f"✅ _generate_ai_turn() END: {sentence_count} sentences in {generation_time:.0f}ms")
+            
+            self.state.turn_llm_generation_ms = generation_time
             
             # Strip signal blocks from full response for memory storage
             import re
@@ -624,9 +758,18 @@ class ConversationEngine:
             
             if clean_response:
                 self.conversation_memory.add_message("assistant", clean_response)
+            
+            # NOTE: Don't set is_ai_speaking=False here - let AI_SPEECH_FINISHED event from reducer handle it
+            # Just mark that AI has responded (for AI authority mode)
+            self.state.ai_has_responded = True
+            print(f"🎬 AI turn finished (ai_has_responded=True)")
                 
         except Exception as e:
             print(f"❌ Error in AI turn generation: {e}")
+            import traceback
+            traceback.print_exc()
+            # Even on error, mark that AI "responded" (failed) so human can interact and retry
+            self.state.ai_has_responded = True
     
     def _extract_signals(self, response_text: str) -> List[str]:
         """Extract signal names from LLM response.
@@ -719,6 +862,11 @@ class ConversationEngine:
         try:
             if not audio_frames:
                 return
+            
+            # Skip if ASR is not available
+            if self.asr is None:
+                print(f"⚠️  ASR not available, skipping turn processing")
+                return
                 
             # Capture transcription timing
             transcription_start = time.time()
@@ -746,44 +894,68 @@ class ConversationEngine:
             signals_started = False
             current_sentence = ""
             
-            # Hybrid streaming: Stream until <signals, then buffer silently
-            for token in self.llm.stream_completion(
-                messages=messages,
-                max_tokens=self.profile_settings["max_tokens"],
-                temperature=self.profile_settings["temperature"],
-            ):
-                if self.human_interrupt_event.is_set():
-                    self.human_interrupt_event.clear()
-                    return
-                
-                if token:
-                    full_response += token
-                    
-                    # Check if signals block is starting (check for opening tag)
-                    if "<signals" in full_response and not signals_started:
-                        signals_started = True
-                        # Strip any partial signal tags from current_sentence before sending
-                        import re
-                        clean_sentence = re.sub(r'<signals.*$', '', current_sentence, flags=re.DOTALL).strip()
-                        if clean_sentence and self._is_valid_ai_sentence(clean_sentence):
-                            self.event_queue.put(Event(EventType.AI_SENTENCE_READY, time.time(), "llm", {"text": clean_sentence}))
-                        current_sentence = ""
-                        continue
-                    
-                    # If signals haven't started, process token as normal sentence
-                    if not signals_started:
-                        current_sentence += token
-                        
-                        # Check for sentence-ending punctuation
-                        if token in ".!?":
-                            if current_sentence.strip() and self._is_valid_ai_sentence(current_sentence.strip()):
-                                self.event_queue.put(Event(EventType.AI_SENTENCE_READY, time.time(), "llm", {"text": current_sentence.strip()}))
-                            current_sentence = ""
-                    # else: signals_started = True, just accumulate silently
+            # Skip if LLM is not available
+            if self.llm is None:
+                print(f"⚠️  LLM not available, skipping response generation")
+                return
             
-            # Handle any remaining sentence at end of stream (stream ended without period)
-            if current_sentence.strip() and not signals_started and self._is_valid_ai_sentence(current_sentence.strip()):
-                self.event_queue.put(Event(EventType.AI_SENTENCE_READY, time.time(), "llm", {"text": current_sentence.strip()}))
+            try:
+                # Hybrid streaming: Stream until <signals, then buffer silently
+                for token in self.llm.stream_completion(
+                    messages=messages,
+                    max_tokens=self.profile_settings["max_tokens"],
+                    temperature=self.profile_settings["temperature"],
+                ):
+                    if self.human_interrupt_event.is_set():
+                        self.human_interrupt_event.clear()
+                        return
+                    
+                    if token:
+                        full_response += token
+                        
+                        # Check if signals block is starting (check for opening tag)
+                        if "<signals" in full_response and not signals_started:
+                            signals_started = True
+                            # Strip any partial signal tags from current_sentence before sending
+                            import re
+                            clean_sentence = re.sub(r'<signals.*$', '', current_sentence, flags=re.DOTALL).strip()
+                            if clean_sentence and self._is_valid_ai_sentence(clean_sentence):
+                                self.event_queue.put(Event(EventType.AI_SENTENCE_READY, time.time(), "llm", {"text": clean_sentence}))
+                            current_sentence = ""
+                            continue
+                        
+                        # If signals haven't started, process token as normal sentence
+                        if not signals_started:
+                            current_sentence += token
+                            
+                            # Check for sentence-ending punctuation
+                            if token in ".!?":
+                                if current_sentence.strip() and self._is_valid_ai_sentence(current_sentence.strip()):
+                                    self.event_queue.put(Event(EventType.AI_SENTENCE_READY, time.time(), "llm", {"text": current_sentence.strip()}))
+                                current_sentence = ""
+                        # else: signals_started = True, just accumulate silently
+                
+                # Handle any remaining sentence at end of stream (stream ended without period)
+                if current_sentence.strip() and not signals_started and self._is_valid_ai_sentence(current_sentence.strip()):
+                    self.event_queue.put(Event(EventType.AI_SENTENCE_READY, time.time(), "llm", {"text": current_sentence.strip()}))
+                
+            except Exception as llm_error:
+                # Handle LLM errors (e.g., invalid API key)
+                error_msg = str(llm_error)
+                if "401" in error_msg or "invalid_api_key" in error_msg.lower() or "unauthorized" in error_msg.lower():
+                    print(f"\n❌ {LLM_BACKEND.upper()} API Authentication Error")
+                    print(f"   Error: {error_msg}")
+                    error_text = f"I apologize, but the {LLM_BACKEND} API encountered an authentication error. Please check your API key in .env or switch to a different backend."
+                    self.event_queue.put(Event(EventType.AI_SENTENCE_READY, time.time(), "llm", {"text": error_text}))
+                    self.state.ai_has_responded = True
+                    self.conversation_memory.add_message("assistant", error_text)
+                else:
+                    print(f"❌ LLM Error ({LLM_BACKEND}): {error_msg}")
+                    error_text = "I apologize, but an error occurred while processing your request. Please try again."
+                    self.event_queue.put(Event(EventType.AI_SENTENCE_READY, time.time(), "llm", {"text": error_text}))
+                    self.state.ai_has_responded = True
+                    self.conversation_memory.add_message("assistant", error_text)
+                return
             
             self.state.turn_llm_generation_ms = (time.time() - llm_start) * 1000
             self.state.turn_total_latency_ms = (time.time() - transcription_start) * 1000
@@ -798,6 +970,7 @@ class ConversationEngine:
             
             if clean_response:
                 self.conversation_memory.add_message("assistant", clean_response)
+                self.state.ai_has_responded = True  # Mark that AI has responded (for AI authority mode)
                 
         except Exception as e:
             print(f"❌ Error in turn processing: {e}")
@@ -838,19 +1011,32 @@ class ConversationEngine:
         """Main dispatcher loop (The Event Loop)."""
         print(f"🎙️ Event-Driven Engine started")
         print(f"📋 Profile: {self.profile_settings['name']} (Authority: {self.state.authority})")
+        print(f"📍 Start mode: {self.profile_settings.get('start', 'human')}")
         
         # Get signal registry and attach optional consumer for logging
         signal_registry = get_signal_registry()
         signal_registry.register_all(handle_signal)  # Log all signals to stdout
         
-        # NOTE: Engine waits for user to click Start in Gradio UI - no auto-start
-        # if self.profile_settings["start"] == "ai":
-        #     threading.Thread(target=self._generate_ai_turn, daemon=True).start()
+        # Auto-start if profile specifies start="ai"
+        if self.profile_settings["start"] == "ai":
+            print("\n🤖 AI-initiated conversation - starting AI greeting...")
+            print(f"   is_ai_speaking={self.state.is_ai_speaking}")
+            print(f"   authority={self.state.authority}")
+            print(f"   Spawning _generate_ai_turn() thread...")
+            threading.Thread(target=self._generate_ai_turn, daemon=True).start()
+        else:
+            print(f"\n👤 Human-initiated conversation - waiting for speech...")
 
         try:
+            event_count = 0
             while not self.shutdown_event.is_set():
                 try:
                     event = self.event_queue.get(timeout=0.1)
+                    event_count += 1
+                    
+                    # Log every 100th event to reduce noise but keep visibility
+                    if event_count % 100 == 0 or event.type in [EventType.VAD_SPEECH_START, EventType.VAD_SPEECH_STOP, "PROCESS_TURN", "RESET_TURN"]:
+                        print(f"📥 Event #{event_count}: {event.type}")
                     
                     # Core Transition
                     self.state, actions = Reducer.reduce(self.state, event)
@@ -872,7 +1058,8 @@ class ConversationEngine:
             self._request_shutdown()
         finally:
             # Ensure resources are stopped and analytics saved even for graceful exits
-            self.audio_manager.stop()
+            if self.audio_manager is not None:
+                self.audio_manager.stop()
             self.session_analytics.save_summary()
             print("✅ Goodbye!")
 

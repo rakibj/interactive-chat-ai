@@ -1,5 +1,5 @@
 """Utility functions for text processing."""
-from config import (
+from interactive_chat.config import (
     TRAILING_CONJUNCTIONS,
     OPEN_ENDED_PREFIXES,
     QUESTION_LEADINS,
