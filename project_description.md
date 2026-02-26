@@ -90,12 +90,14 @@ interactive-chat-ai/
 - Signal extraction from LLM responses: `_extract_signals()` parses `<signals>...</signals>` blocks
 - Phase transition logic: `_check_phase_transitions()` matches emitted signals to transition rules
 - Transition execution: `_transition_to_phase()` handles:
-  - Adding previous phase to `phases_completed` list (marks as ✅)
-  - Updating `active_phase_id` and `phase_index` for new phase
-  - Clearing conversation memory for fresh phase start
+  - Saves conversation history to `message_history_by_phase[current_phase_id]` (BEFORE switching phases)
+  - Adds previous phase to `phases_completed` list (marks as ✅)
+  - Updating `active_phase_id`, `current_phase_id`, and `phase_index` for new phase
+  - Clearing phase-specific signal history for fresh phase state (not conversation memory)
   - Injecting phase context into system prompt
   - Optional AI greeting generation
 - Signal logging: Debug logs show emitted signals (`📡 Signals: ...`) and transitions (`🔀 Phase transition: ...`)
+- **Critical Fix** (Feb 27): Reducer queues action without updating state, handler runs with OLD phase_id active to save history correctly
 
 **API Integration** (Phase 3):
 
@@ -132,25 +134,27 @@ while not shutdown:
 - Total processing latency
 - Final user and AI transcripts
 
-**Recent Fixes** (Latest Session - Critical Stability):
-- ✅ **CRITICAL FIX**: Added comprehensive exception handling to event loop in `main.py` - app was silently exiting with unhandled errors
-  - Wrapped state reduction with try/except to catch and log reducer errors
-  - Wrapped action handling with try/except to prevent side-effect failures from crashing loop
-  - Added outer exception handler in main loop to catch any unexpected errors
-  - App now continues gracefully even when individual operations fail
-- ✅ Created 3 new stability tests (test_app_stability.py) that verify no crash on human input:
-  - `test_human_speaking_doesnt_crash` - Simulates full conversation turn with human speech
-  - `test_event_loop_exception_handling` - Verifies reducer exceptions are caught
-  - `test_action_handler_exception_handling` - Verifies action handler exceptions don't crash app
-- ✅ Fixed test_error_handling.py import error - removed broken interface.profiles module reference
-- ✅ Verified all core unit tests still pass (16/16 in test_headless_standalone.py)
-- ✅ Confirmed all stability tests pass (3/3 in test_app_stability.py)
+**Recent Fixes** (Latest Session - Phase Transitions Critical Fix - February 27, 2026):
+- ✅ **CRITICAL PHASE TRANSITION BUG FIX**: Fixed inverted phase completion tracking
+  - **Issue**: `phases_completed` was getting NEW phase instead of OLD phase; conversation history lost between phases
+  - **Root Cause**: Reducer was updating `state.current_phase_id` BEFORE the handler ran, preventing history save from old phase
+  - **Fix**: Removed premature state update from Reducer.reduce() PHASE_TRANSITION handler (event_driven_core.py)
+    - Reducer now only queues action, handler updates state AFTER saving history
+    - Correct order: save history (with OLD phase_id) → mark old phase complete → update to new phase_id
+  - **Added**: Comprehensive debug logging in phase transition flow (signal extraction, checking, execution)
+  - **Result**: ✅ Phase statuses correct | ✅ History fully preserved | ✅ All 46 tests passing
+- ✅ Message deduplication in `/api/chat/phases` endpoint
+- ✅ Status priority logic: active > completed > upcoming
+- ✅ History reconstruction from `message_history_by_phase`
+- ✅ Mock object handling for tests
 
-**Previous Session Fixes** (February 26, 2026):
-- ✅ Fixed test_error_handling.py import error - removed broken interface.profiles module reference
-- ✅ Updated test infrastructure to use current ConversationEngine API (profile_key strings)
-- ✅ Verified all core unit tests pass (16/16 in test_headless_standalone.py) ✅
-- ✅ Confirmed test collection works without errors (19 test files, 266+ tests ready)
+**Previous Stability Fixes** (February 26, 2026 - Critical Stability):
+- ✅ **CRITICAL FIX**: Added comprehensive exception handling to event loop
+  - Wrapped state reduction with try/except to catch and log reducer errors
+  - App continues gracefully even when individual operations fail
+- ✅ Created 3 new stability tests verifying no crash on human input
+- ✅ Fixed test_error_handling.py import error
+- ✅ Verified all core unit tests pass (16/16 in test_headless_standalone.py)
 
 ### 2. Event-Driven Core (`core/event_driven_core.py`)
 
@@ -256,8 +260,16 @@ SystemState now tracks per-turn metrics for automatic analytics logging:
 1. System starts in `initial_phase`.
 2. After each AI response, signals are extracted from `<signals></signals>` blocks at the end of the response.
 3. Signals are checked against phase transition rules; if matched, a `PHASE_TRANSITION` event is emitted.
-4. The system loads the new InstructionProfile, updates SystemState, clears conversation memory and signal history, injects phase context, and generates an AI greeting if needed.
-5. Signals are used for analytics, phase transitions, and UI updates, but do not trigger tool calls or direct actions.
+4. **Reducer** processes event: Queues `TRANSITION_PHASE` action (does NOT update state - critical!)
+5. **Handler** `_transition_to_phase()` then executes:
+   - Saves conversation memory to `message_history_by_phase[current_phase_id]` (using OLD phase_id)
+   - Marks old phase as complete in `phases_completed`
+   - Loads new InstructionProfile and updates SystemState settings
+   - Clears phase signal history for clean state
+   - Updates `current_phase_id` and `active_phase_id` to new phase
+   - Injects phase context into system prompt
+   - Generates AI greeting if needed
+6. Signals are used for analytics, phase transitions, and UI updates, but do not trigger tool calls or direct actions.
 
 **Custom Response Handling**:
 - Only signals are implemented for custom LLM responses. The LLM can emit signals in its response (e.g., `<signals>{...}</signals>`), which are used for phase transitions, analytics, and observability.
@@ -321,15 +333,24 @@ This makes the system flexible for multi-phase flows and robust analytics, but c
 
 1. System starts in `initial_phase`
 2. After each AI response, `_extract_signals()` parses `<signals></signals>` blocks
-3. `_check_phase_transitions()` checks if emitted signals match any transition rules
-4. If match found, `PHASE_TRANSITION` event emitted
-5. `_transition_to_phase()` executes:
-   - Loads new InstructionProfile
-   - Updates SystemState with new settings (authority, timeouts, etc.)
-   - **Clears conversation memory for fresh start** (each phase begins with clean context)
-   - Clears signal history for new phase
+3. `_check_phase_transitions()` checks if emitted signals match transition rules
+4. If match found, `PHASE_TRANSITION` event emitted to event queue
+5. **Reducer processes event**: Queues TRANSITION_PHASE action (does NOT update state - critical!)
+6. `_transition_to_phase(next_phase_id)` handler executes WITH OLD phase_id still active:
+   - Saves current conversation memory to `message_history_by_phase[current_phase_id]` (old phase!)
+   - Adds current_phase_id to `phases_completed` (marks old phase as done)
+   - Loads new InstructionProfile settings
+   - Updates SystemState with new profile settings (authority, timeouts, etc.)
+   - **Clears phase signal history** (only keeps history for that phase)
+   - Updates `current_phase_id = next_phase_id` (NOW switches to new phase)
+   - Updates `active_phase_id = next_phase_id` (keeps in sync)
    - Injects phase context into system prompt
    - Generates AI greeting if new phase starts with AI
+
+**Key Fix** (February 27, 2026): Reducer no longer updates current_phase_id prematurely. Handler runs AFTER state check, BEFORE state update, ensuring:
+- Old phase messages saved to correct `message_history_by_phase[old_phase_id]`
+- Old phase added to `phases_completed` (not the new phase!)
+- API returns correct `phases_completed` list and conversation history
 
 **Context Injection**:
 When running a phase, system prompt is constructed as:
@@ -346,10 +367,11 @@ SYSTEM_PROMPT_BASE
 
 **Phase Isolation**: Each phase operates independently:
 
-- Conversation memory cleared on transition (prevents cross-phase confusion)
+- Conversation history saved to `message_history_by_phase[phase_id]` before transition (preserves context)
 - All turn metrics reset for new phase
 - Phase signals reset so only current phase's signals matter for transitions
 - Ensures clear separation of concerns between phases
+- Each phase starts fresh but conversation history is available in API response for UI display
 
 **Backward Compatibility**: 100% - Standalone InstructionProfiles work unchanged. Set `ACTIVE_PHASE_PROFILE = None` to use single profile mode.
 

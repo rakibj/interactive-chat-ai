@@ -155,8 +155,13 @@ class ConversationEngine:
         
         # Calculate total phases if using phase profile
         total_phases = 0
+        initial_phase_index = 0  # Default to 0
         if self.active_phase_profile:
             total_phases = len(self.active_phase_profile.phases)
+            # Calculate the initial_phase_index based on actual initial phase position
+            phase_ids = list(self.active_phase_profile.phases.keys())
+            if current_phase_id and current_phase_id in phase_ids:
+                initial_phase_index = phase_ids.index(current_phase_id)
         
         # Initialize Event-Driven Core State
         self.state = SystemState(
@@ -171,7 +176,7 @@ class ConversationEngine:
             # Add phase observation tracking
             active_phase_id=current_phase_id,
             active_phase_name=current_phase_name,  # Add the phase display name
-            phase_index=0,
+            phase_index=initial_phase_index,
             total_phases=total_phases,
             phases_completed=[],
         )
@@ -353,6 +358,10 @@ class ConversationEngine:
         """Gracefully stop processing after pending speech finishes."""
         if self.shutdown_event.is_set():
             return
+        
+        # Mark conversation as ended so frontend knows
+        self.state.conversation_ended = True
+        
         # Wait for any queued speech to finish (bounded wait)
         try:
             self.speech_to_speak_queue.join()
@@ -472,27 +481,48 @@ class ConversationEngine:
     
     def _transition_to_phase(self, next_phase_id: str) -> None:
         """Transition to a new phase in the PhaseProfile."""
+        print(f"\n{'='*70}")
+        print(f"🔄 PHASE TRANSITION METHOD CALLED")
+        print(f"{'='*70}")
+        
         if not self.active_phase_profile:
+            print(f"❌ No active phase profile! Returning without transition")
             return
         
         next_profile = self.active_phase_profile.get_phase(next_phase_id)
         if not next_profile:
-            print(f"⚠️ Warning: Phase '{next_phase_id}' not found")
+            print(f"❌ Phase '{next_phase_id}' not found in profile! Returning without transition")
             return
+        
+        print(f"✓ Found next profile: {next_profile.name}")
         
         # SAVE current phase messages before clearing
         if self.state.current_phase_id:
+            print(f"\n📊 STATE BEFORE TRANSITION:")
+            print(f"   current_phase_id: {self.state.current_phase_id}")
+            print(f"   active_phase_id: {self.state.active_phase_id}")
+            print(f"   phases_completed: {self.state.phases_completed}")
+            
             try:
                 current_messages = self.conversation_memory.get_messages()
+                print(f"\n💾 Saving conversation history:")
+                print(f"   Messages to save: {len(current_messages)}")
+                
                 # Filter out system messages
                 non_system_messages = [
                     msg for msg in current_messages
                     if msg.get("role") != "system"
                 ]
+                print(f"   Non-system messages: {len(non_system_messages)}")
+                
                 self.state.message_history_by_phase[self.state.current_phase_id] = non_system_messages
-                print(f"💾 Saved {len(non_system_messages)} messages from phase '{self.state.current_phase_id}'")
+                print(f"   ✓ Saved to message_history_by_phase['{self.state.current_phase_id}']")
+                print(f"   Message history keys: {list(self.state.message_history_by_phase.keys())}")
+                
             except Exception as e:
-                print(f"⚠️ Warning: Could not save phase messages: {e}")
+                print(f"❌ Error saving phase messages: {e}")
+                import traceback
+                traceback.print_exc()
         
         # Update profile settings
         self.profile_settings = get_profile_settings(None, next_profile)
@@ -500,10 +530,12 @@ class ConversationEngine:
         # Mark previous phase as completed (if there was one)
         if self.state.current_phase_id and self.state.current_phase_id not in self.state.phases_completed:
             self.state.phases_completed.append(self.state.current_phase_id)
+            print(f"\n✓ Added '{self.state.current_phase_id}' to phases_completed")
         
         # CRITICAL: Deduplicate the entire list (remove any accumulated duplicates)
         # Use dict.fromkeys to preserve order while removing duplicates
         self.state.phases_completed = list(dict.fromkeys(self.state.phases_completed))
+        print(f"   Updated phases_completed (dedup): {self.state.phases_completed}")
         
         # Calculate phase index (position in phase list)
         phase_ids = list(self.active_phase_profile.phases.keys())
@@ -521,14 +553,23 @@ class ConversationEngine:
         self.state.active_phase_name = next_profile.name  # Set the phase display name
         self.state.phase_index = new_phase_index
         
+        print(f"\n📊 STATE AFTER TRANSITION:")
+        print(f"   current_phase_id: {self.state.current_phase_id}")
+        print(f"   active_phase_id: {self.state.active_phase_id}")
+        print(f"   phases_completed: {self.state.phases_completed}")
+        print(f"   phase_index: {self.state.phase_index}")
+        print(f"   active_phase_name: {self.state.active_phase_name}")
+        
         # Clear phase signals for new phase
         self.phase_emitted_signals.clear()
+        print(f"\n✓ Cleared phase_emitted_signals for new phase")
+        
+        print(f"✅ Transitioned to phase: {next_profile.name}")
+        print(f"{'='*70}\n")
         
         # DO NOT clear conversation_memory - messages are preserved in message_history_by_phase
         # and the /api/chat endpoint reconstructs the full history from all phases
         # self.conversation_memory.clear()  # REMOVED: Preserve chat history across phases
-        
-        print(f"✅ Transitioned to phase: {next_profile.name}")
         
         # If new phase starts with AI, generate greeting
         if next_profile.start == "ai":
@@ -538,12 +579,21 @@ class ConversationEngine:
     def _check_phase_transitions(self, emitted_signals: List[str]) -> None:
         """Check if any signals trigger a phase transition."""
         if not self.active_phase_profile or not self.state.current_phase_id:
+            print(f"⚠️  Phase transition check skipped: active_phase_profile={bool(self.active_phase_profile)}, current_phase_id={self.state.current_phase_id}")
             return
+        
+        print(f"\n📡 Checking phase transitions...")
+        print(f"   Current phase: {self.state.current_phase_id}")
+        print(f"   Newly emitted signals: {emitted_signals}")
+        print(f"   All accumulated signals: {self.phase_emitted_signals}")
         
         # Add newly emitted signals to the list
         for sig in emitted_signals:
             if sig not in self.phase_emitted_signals:
                 self.phase_emitted_signals.append(sig)
+                print(f"   ✓ Added signal: {sig}")
+        
+        print(f"   Updated phase signals: {self.phase_emitted_signals}")
         
         # Check if we should transition
         next_phase = self.active_phase_profile.find_transition(
@@ -552,8 +602,9 @@ class ConversationEngine:
         )
         
         if next_phase:
-            print(f"🔀 Phase transition triggered: {self.state.current_phase_id} → {next_phase}")
-            print(f"   Signals that triggered: {self.phase_emitted_signals}")
+            print(f"✅ Phase transition triggered: {self.state.current_phase_id} → {next_phase}")
+            print(f"   Signals matched: {self.phase_emitted_signals}")
+            print(f"   Queuing PHASE_TRANSITION event...")
             
             # Emit phase transition event
             self.event_queue.put(Event(
@@ -562,6 +613,7 @@ class ConversationEngine:
                 "phase_manager",
                 {"next_phase": next_phase}
             ))
+            print(f"   ✓ Event queued. Event queue size: {self.event_queue.qsize()}")
             return
         else:
             # No transition found yet - show what would trigger it
@@ -753,7 +805,16 @@ class ConversationEngine:
             
             # Log signals for debugging
             if emitted_signals:
-                print(f"📡 Signals emitted: {emitted_signals}")
+                print(f"📡 Signals extracted: {emitted_signals}")
+                for sig in emitted_signals:
+                    print(f"   ✓ {sig}")
+            else:
+                print(f"⚠️  No signals found in response (expected <signals>...</signals> block)")
+                # Show a snippet of the response to debug
+                if len(full_response) > 200:
+                    print(f"   Response snippet: {full_response[:200]}...")
+                else:
+                    print(f"   Full response: {full_response}")
             
             self._check_phase_transitions(emitted_signals)
             

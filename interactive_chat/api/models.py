@@ -78,13 +78,15 @@ class SpeakerStatus(BaseModel):
     speaker: str = Field(..., description="Current speaker: 'human', 'ai', or 'silence'")
     timestamp: float = Field(..., description="Unix timestamp")
     phase_id: Optional[str] = Field(None, description="Current phase ID")
+    conversation_ended: bool = Field(False, description="True if all phases completed and conversation has ended")
     
     class Config:
         json_schema_extra = {
             "example": {
                 "speaker": "ai",
                 "timestamp": 1707052800.456,
-                "phase_id": "part1"
+                "phase_id": "part1",
+                "conversation_ended": False
             }
         }
 

@@ -147,10 +147,16 @@ async def get_speaker_status():
     
     state = _engine.state
     
+    # Get conversation_ended safely (handle Mock objects in tests)
+    conversation_ended = getattr(state, "conversation_ended", False)
+    if not isinstance(conversation_ended, bool):
+        conversation_ended = False
+    
     return SpeakerStatus(
         speaker=state.current_speaker or "silence",
         timestamp=datetime.now().timestamp(),
         phase_id=state.active_phase_id,
+        conversation_ended=conversation_ended,
     )
 
 
@@ -327,6 +333,8 @@ async def get_chat_messages_by_phases():
     message_history_by_phase = dict(getattr(state, "message_history_by_phase", {}))
     
     # Add current phase's messages (from conversation_memory)
+    # IMPORTANT: Only add messages that haven't already been saved in completed phases
+    # This prevents duplicate messages when conversation_memory accumulates across phases
     try:
         current_messages_raw = _engine.conversation_memory.get_messages()
         current_messages = [
@@ -334,7 +342,29 @@ async def get_chat_messages_by_phases():
             if msg.get("role") != "system"
         ]
         active_phase_id = state.active_phase_id or "default"
-        message_history_by_phase[active_phase_id] = current_messages
+        
+        # Build set of messages already saved in completed phases to avoid duplication
+        already_saved_contents = set()
+        for completed_phase_id, saved_msgs in message_history_by_phase.items():
+            for msg in saved_msgs:
+                # Use message content as unique identifier to detect previously saved messages
+                content = msg.get("content", "").strip()
+                if content:
+                    already_saved_contents.add(content)
+        
+        # Only add messages from conversation_memory that are NEW
+        # (not already saved in previous phases)
+        new_messages = []
+        for msg in current_messages:
+            content = msg.get("content", "").strip()
+            if content and content not in already_saved_contents:
+                new_messages.append(msg)
+            elif not content:
+                # Include empty messages too
+                new_messages.append(msg)
+        
+        # Update current phase with only NEW messages (excluding those from prior phases)
+        message_history_by_phase[active_phase_id] = new_messages
     except AttributeError:
         current_messages = []
     
@@ -411,11 +441,12 @@ async def get_chat_messages_by_phases():
     
     # Build phases list in profile order
     for phase_index, phase_id in enumerate(all_profile_phase_ids):
-        # Determine phase status
-        if phase_id in phases_completed:
-            phase_status = "completed"
-        elif phase_id == active_phase_id:
+        # Determine phase status (PRIORITY: active > completed > upcoming)
+        # Check active FIRST so a phase can't be both active and completed
+        if phase_id == active_phase_id:
             phase_status = "active"
+        elif phase_id in phases_completed:
+            phase_status = "completed"
         else:
             phase_status = "upcoming"
         
@@ -510,27 +541,89 @@ async def get_full_state():
     
     # Build speaker status (use state.current_speaker if available, otherwise "silence")
     current_speaker = getattr(state, 'current_speaker', 'silence') or 'silence'
+    
+    # Get conversation_ended safely (handle Mock objects in tests)
+    conversation_ended = getattr(state, "conversation_ended", False)
+    if not isinstance(conversation_ended, bool):
+        conversation_ended = False
+    
     speaker_status = SpeakerStatus(
         speaker=current_speaker,
         timestamp=datetime.now().timestamp(),
         phase_id=state.active_phase_id,
+        conversation_ended=conversation_ended,
     )
     
-    # Build history from available data
+    # Build history from message_history_by_phase (preserves conversation across all phases)
     history = []
-    # conversation_history doesn't exist in SystemState, so we start with empty list
-    # In the future, we can populate this from analytics or a separate history store
-    conversation_history = getattr(state, 'conversation_history', [])
+    message_history_by_phase = getattr(state, 'message_history_by_phase', {})
     
-    for i, turn_data in enumerate(conversation_history[-20:]):
+    # Handle case where message_history_by_phase is a Mock object in tests
+    if not isinstance(message_history_by_phase, dict):
+        message_history_by_phase = {}
+    
+    # Collect all messages from all phases in order
+    all_messages = []
+    
+    if message_history_by_phase:
+        # Use new message_history_by_phase (preferred)
+        for phase_id, messages in message_history_by_phase.items():
+            for msg in messages:
+                all_messages.append({
+                    "role": msg.get("role", "system"),
+                    "content": msg.get("content", ""),
+                    "phase_id": phase_id,
+                    "timestamp": msg.get("timestamp", 0)
+                })
+    else:
+        # Fall back to old conversation_history for backwards compatibility
+        conversation_history = getattr(state, 'conversation_history', [])
+        if isinstance(conversation_history, list):
+            for turn_data in conversation_history:
+                all_messages.append({
+                    "role": "assistant" if turn_data.get("speaker") == "ai" else "user",
+                    "content": turn_data.get("transcript", ""),
+                    "phase_id": turn_data.get("phase_id", "unknown"),
+                    "timestamp": turn_data.get("timestamp", 0)
+                })
+    
+    # Also add current phase messages from conversation_memory
+    if _engine and hasattr(_engine, 'conversation_memory'):
+        try:
+            current_messages = _engine.conversation_memory.get_messages()
+            active_phase = state.active_phase_id or "unknown"
+            
+            # Build set of already-saved message contents to avoid duplication
+            saved_contents = set()
+            for msg in all_messages:
+                content = msg.get("content", "").strip()
+                if content:
+                    saved_contents.add(content)
+            
+            # Add only new messages from conversation_memory
+            for msg in current_messages:
+                if msg.get("role") != "system":
+                    content = msg.get("content", "").strip()
+                    if content and content not in saved_contents:
+                        all_messages.append({
+                            "role": msg.get("role", "system"),
+                            "content": content,
+                            "phase_id": active_phase,
+                            "timestamp": msg.get("timestamp", 0)
+                        })
+        except (AttributeError, TypeError):
+            pass
+    
+    # Convert to Turn objects (limit to last 50 for UI)
+    for i, msg_data in enumerate(all_messages[-50:]):
         turn = Turn(
             turn_id=i,
-            speaker=turn_data.get("speaker", "unknown"),
-            transcript=turn_data.get("transcript", ""),
-            timestamp=turn_data.get("timestamp", 0),
-            phase_id=turn_data.get("phase_id", state.active_phase_id or "unknown"),
-            duration_sec=turn_data.get("duration_sec", 0),
-            latency_ms=turn_data.get("latency_ms"),
+            speaker="ai" if msg_data["role"] == "assistant" else "user" if msg_data["role"] == "user" else "unknown",
+            transcript=msg_data.get("content", ""),
+            timestamp=msg_data.get("timestamp", 0),
+            phase_id=msg_data.get("phase_id", state.active_phase_id or "unknown"),
+            duration_sec=0.0,
+            latency_ms=None,
         )
         history.append(turn)
     
@@ -582,11 +675,12 @@ def _build_phase_progress(state, engine=None) -> list:
         
         progress = []
         for phase_id, phase_prof in phases_dict.items():
-            # Determine status
-            if phase_id in (state.phases_completed or []):
-                status = "completed"
-            elif phase_id == state.active_phase_id:
+            # Determine status (PRIORITY: active > completed > upcoming)
+            # Check active FIRST so a phase can't be both active and completed
+            if phase_id == state.active_phase_id:
                 status = "active"
+            elif phase_id in (state.phases_completed or []):
+                status = "completed"
             else:
                 status = "upcoming"
             

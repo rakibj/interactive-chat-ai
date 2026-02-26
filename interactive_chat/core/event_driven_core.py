@@ -92,6 +92,7 @@ class SystemState:
     # Logic State
     human_speaking_limit_ack_sent: bool = False
     force_ended: bool = False
+    conversation_ended: bool = False  # True when all phases complete and shutdown is requested
     last_interrupt_time: float = 0
     
     # History
@@ -356,7 +357,9 @@ class Reducer:
             # Handle phase transition request
             next_phase = event.payload.get("next_phase")
             if next_phase:
-                state.current_phase_id = next_phase
+                # NOTE: Do NOT update state.current_phase_id here!
+                # Let _transition_to_phase() do it AFTER saving the history from the current phase.
+                # If we update it here, the handler won't know which phase to save history from.
                 actions.append(Action(
                     ActionType.TRANSITION_PHASE,
                     {"next_phase": next_phase}

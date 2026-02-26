@@ -168,7 +168,7 @@ class PhaseProfile(BaseModel):
 CONVERSATION_START = "human"  # Options: "human" or "ai" (can be overridden per profile)
 ACTIVE_PROFILE = "ielts_instructor"  # Select which profile to use
 ACTIVE_PHASE_PROFILE: Optional[str] = None  # If set, use a PhaseProfile instead of single profile
-ACTIVE_PHASE_PROFILE = "ielts_full_exam"  # Example: set to "ielts_full_exam" to use that profile
+ACTIVE_PHASE_PROFILE = "name_age_test"  # Example: set to "ielts_full_exam" to use that profile
 # simple_test, ielts_full_exam, sales_call, customer_support, language_tutor, negotiation_scenario
 
 # Default LLM Parameters (can be overridden per profile)

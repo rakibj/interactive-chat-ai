@@ -544,8 +544,9 @@ class DashboardApp {
         const container = document.getElementById("progress-container");
         if (!data || !data.phases) return;
 
-        const currentIndex = data.phases.findIndex(p => p.status === "active") || 0;
-        document.getElementById("phase-progress").textContent = `Step ${currentIndex + 1} of ${data.total_phases}`;
+        const currentIndex = data.phases.findIndex(p => p.status === "active");
+        const displayIndex = currentIndex >= 0 ? currentIndex + 1 : 1;
+        document.getElementById("phase-progress").textContent = `Step ${displayIndex} of ${data.total_phases}`;
 
         let html = `<div class="absolute left-[27px] top-4 bottom-4 w-0.5 bg-slate-100 dark:bg-slate-700 -z-10"></div>`;
 
@@ -613,8 +614,13 @@ class DashboardApp {
         }
 
         if (state && state.speaker) {
-            const speaker = state.speaker.speaker;
-            const speakerDisplay = speaker === "human" ? "Human Speaking" : speaker === "ai" ? "AI Speaking" : "Listening";
+            let speakerDisplay;
+            if (state.speaker.conversation_ended) {
+                speakerDisplay = "Call Ended";
+            } else {
+                const speaker = state.speaker.speaker;
+                speakerDisplay = speaker === "human" ? "Human Speaking" : speaker === "ai" ? "AI Speaking" : "Listening";
+            }
             document.getElementById("speaker-status").textContent = speakerDisplay;
             document.getElementById("current-speaker").textContent = speakerDisplay;
         }
